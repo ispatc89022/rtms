@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recruit Training Management System – ระบบควบคุม/จัดการการฝึกทหารใหม่ RTMS 12.1.4a</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot, writeBatch, deleteDoc, updateDoc, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, onSnapshot, writeBatch, deleteDoc, updateDoc, addDoc };
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; color: #1e293b; text-align: left; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .input-field { width: 100%; padding: 0.75rem 0.85rem; background: white; border: 1.5px solid #e2e8f0; border-radius: 0.75rem; font-weight: 600; outline: none; transition: all 0.2s; }
+        .input-field:focus { border-color: #4f46e5; box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1); }
+        .tab-active { background-color: #4f46e5; color: white; box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3); }
+        .section-box { background-color: #f1f5f9; padding: 1.25rem; border-radius: 1.25rem; border: 1px solid #e2e8f0; margin-bottom: 1.5rem; }
+        .section-title { font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem; border-left: 4px solid #4f46e5; padding-left: 10px; }
+        .btn-filter { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 700; transition: all 0.2s; border: 1px solid #e2e8f0; background: white; color: #64748b; }
+        .btn-filter.active { background: #4f46e5; color: white; border-color: #4f46e5; }
+        .subtab-active { border-bottom: 3px solid #4f46e5; color: #4f46e5; font-weight: 800; }
+        .role-tag { font-size: 8px; font-weight: 800; padding: 2px 5px; border-radius: 4px; text-transform: uppercase; margin-right: 2px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, onSnapshot, writeBatch, deleteDoc, updateDoc, addDoc } = window.FirebaseSDK;
+
+        // --- 1. FIREBASE CONFIG ---
+        const firebaseConfig = { 
+            apiKey: "AIzaSyClnFib72Jwn2umtlG0fD4jBaE-aG1ceWk", 
+            authDomain: "rtcdb-66284.firebaseapp.com", 
+            projectId: "rtcdb-66284", 
+            storageBucket: "rtcdb-66284.firebasestorage.app", 
+            messagingSenderId: "800467259752", 
+            appId: "1:800467259752:web:961e90546df3390e2b06dd" 
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "military-system-v12";
+        const SHEET_ID = "1U4dq5m8MbwyYgfgN_zhTWJEDAjIfR3DA6h5H2YEQdGU";
+
+        // --- 2. CONSTANTS ---
+        const RANKS = ['พล.อ.', 'พล.ท.', 'พล.ต.', 'พ.อ. (พิเศษ)', 'พ.อ.', 'พ.ท.', 'พ.ต.', 'ร.อ.', 'ร.ท.', 'ร.ต.', 'จ.ส.อ. (พิเศษ)', 'จ.ส.อ.', 'จ.ส.ท.', 'จ.ส.ต.', 'ส.อ.', 'ส.ท.', 'ส.ต.'];
+        const GUEST_RANKS = [...RANKS, 'อื่นๆ']; // เพิ่ม อื่นๆ สำหรับกองอำนวยการ
+        const REGIONS_LIST = ['ทภ.1', 'ทภ.2', 'ทภ.3', 'ทภ.4', 'นขต.ทบ.'];
+        const ORIGINS = ['นตท.', 'นนส.', 'อื่นๆ'];
+        const TRAINING_EXP = ['ไม่เคยฝึก', '1-2 ผลัด', '3-4 ผลัด', 'มากกว่า 4 ผลัด'];
+        const TRAVEL_METHODS = ['รถรวม', 'รถส่วนตัว'];
+        const ROOM_TYPES = ['พักรวม', 'พักเดี่ยว'];
+        const ROOM_STATUSES = ['ว่าง', 'ไม่ครบคู่', 'รับห้องแล้ว', 'คืนห้องแล้ว', 'VIP', 'อื่นๆ'];
+        const DIETARY_RESTRICTIONS = ['ไม่มีข้อจำกัดด้านอาหาร', 'อาหารอิสลาม', 'มังสวิรัติ', 'แพ้อาหารทะเล'];
+        const CATEGORIES = ['กองอำนวยการ', 'ผู้บังคับบัญชา', 'วิทยากร', 'อื่นๆ'];
+        
+        const ROLES_CONFIG = {
+            SUPER_ADMIN: { label: 'ทั้งหมด', color: 'bg-rose-500 text-white' },
+            SEMINAR: { label: 'สัมมนา', color: 'bg-indigo-500 text-white' },
+            ACCOMMODATION: { label: 'จัดการที่พัก', color: 'bg-emerald-500 text-white' },
+            UNITS: { label: 'ฐานข้อมูลหน่วย', color: 'bg-amber-500 text-white' },
+            VIEWER: { label: 'ดูได้อย่างเดียว', color: 'bg-slate-400 text-white' }
+        };
+
+        const INITIAL_SEMINAR_FORM = {
+            region: '', unitName: '', rank: '', firstName: '', lastName: '', nickname: '', 
+            phone: '', lineId: '', position: '', origin: '', originOther: '', batch: '', year: '', 
+            npBatch: '', npYear: '', trainingExp: 'ไม่เคยฝึก', travelBy: 'รถรวม', 
+            roomTypePref: 'พักรวม', dietary: 'ไม่มีข้อจำกัดด้านอาหาร', remarks: '', 
+            disbursement: 'เบิกไม่ได้', roomId: '', paymentStatus: 'ยังไม่จ่าย'
+        };
+
+        const MOCK_NAMES = ["สมชาย", "วิชัย", "ธนพล", "เอกชัย", "สุรศักดิ์", "ณัฐวุฒิ", "กิตติพงษ์", "อรรถพล", "ศักดิ์ชัย", "ธีรภัทร"];
+        const MOCK_LASTNAMES = ["ใจกล้า", "มั่นคง", "รักเกียรติ", "พิชิตชัย", "เก่งกาจ", "พิทักษ์ไทย", "องอาจ", "ชาติทหาร", "ยอดเยี่ยม", "เข้มแข็ง"];
+
+        // --- Helper Function: Google Sheet Timestamp Format ---
+        const getGSheetTimestamp = () => {
+            const d = new Date();
+            const pad = (n) => n.toString().padStart(2, '0');
+            return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        };
+
+        // --- 3. UI COMPONENTS ---
+        const Icon = ({ name, size = 16, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    iconRef.current.innerHTML = `<i data-lucide="${name}" style="width: ${size}px; height: ${size}px;"></i>`;
+                    window.lucide.createIcons({ root: iconRef.current });
+                }
+            }, [name, size]);
+            return <span ref={iconRef} className={`inline-flex items-center justify-center ${className}`}></span>;
+        };
+
+        const Field = ({ label, children }) => (
+            <div className="space-y-1 text-left">
+                <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 tracking-wider">{label}</label>
+                {children}
+            </div>
+        );
+
+        const Modal = ({ title, isOpen, onClose, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-200">
+                        <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+                            <h3 className="text-lg font-bold text-slate-800 uppercase leading-none">{title}</h3>
+                            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                                <Icon name="x" size={20} className="text-slate-500" />
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto no-scrollbar">{children}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 4. MAIN APPLICATION ---
+        const App = () => {
+            const [adminProfile, setAdminProfile] = useState(null);
+            const [activeSheet, setActiveSheet] = useState('seminar');
+            const [accSubTab, setAccSubTab] = useState('manage');
+            const [adminSubTab, setAdminSubTab] = useState('users');
+            
+            const [seminar, setSeminar] = useState([]);
+            const [guests, setGuests] = useState([]);
+            const [rooms, setRooms] = useState([]);
+            const [units, setUnits] = useState([]);
+            const [admins, setAdmins] = useState([]);
+            const [logs, setLogs] = useState([]);
+            
+            const [searchTerm, setSearchTerm] = useState('');
+            const [accSearchTerm, setAccSearchTerm] = useState(''); 
+            const [accRoomSearchTerm, setAccRoomSearchTerm] = useState(''); 
+            const [unitSearchTerm, setUnitSearchTerm] = useState('');
+            const [unitRegionFilter, setUnitRegionFilter] = useState('All');
+            const [statusMsg, setStatusMsg] = useState('');
+            const [isLoginView, setIsLoginView] = useState(false);
+            const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+            const [loginError, setLoginError] = useState('');
+            const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+            // Time state for the sub-header
+            const [currentTime, setCurrentTime] = useState(new Date());
+
+            const isSeedingRef = useRef(false);
+            
+            // File input refs for CSV Import
+            const importSeminarRef = useRef(null);
+            const importGuestRef = useRef(null);
+            const importUnitRef = useRef(null);
+            const importRoomRef = useRef(null);
+
+            const [isSeminarModalOpen, setIsSeminarModalOpen] = useState(false);
+            const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+            const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+            const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+            const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
+            const [isChangelogOpen, setIsChangelogOpen] = useState(false); 
+            const [isEditMode, setIsEditMode] = useState(false);
+            const [currentEditItem, setCurrentEditItem] = useState(null);
+            
+            const [seminarForm, setSeminarForm] = useState(INITIAL_SEMINAR_FORM);
+            const [guestForm, setGuestForm] = useState({ rank: '', rankOther: '', firstName: '', lastName: '', nickname: '', position: '', category: 'กองอำนวยการ', phone: '', roomId: '', unit: '' });
+            const [adminForm, setAdminForm] = useState({ name: '', username: '', password: '', roles: ['VIEWER'] });
+            const [unitForm, setUnitForm] = useState({ id: '', region: 'ทภ.1', name: '' });
+            const [roomForm, setRoomForm] = useState({ roomNo: '', type: 'พักรวม', status: 'ว่าง', statusOther: '' });
+
+            const showStatus = (msg) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(''), 4000); };
+
+            const logAction = async (action, details = "") => {
+                if (!db || !adminProfile) return;
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
+                        timestamp: new Date(),
+                        userId: adminProfile.username, userName: adminProfile.name, action, details
+                    });
+                } catch(e) {}
+            };
+
+            const hasPermission = (module) => {
+                if (!adminProfile) return false;
+                if (adminProfile.roles?.includes('SUPER_ADMIN')) return true;
+                return adminProfile.roles?.includes(module);
+            };
+
+            const maskPhoneNumber = (phone) => {
+                if (!phone || phone.length < 9) return phone;
+                const p = phone.replace(/\D/g, ''); 
+                if (p.length < 9) return phone;
+                return `${p.substring(0, 3)}-XXX-${p.substring(p.length - 4)}`;
+            };
+
+            const formatPhone = (phone) => {
+                if (!phone) return '-';
+                const p = phone.replace(/\D/g, ''); 
+                if (p.length !== 10) return phone;
+                return `${p.substring(0, 3)}-${p.substring(3, 6)}-${p.substring(6)}`;
+            };
+
+            // Process CSV Logic
+            const processCSVText = async (text, collectionName) => {
+                if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+                const rows = [];
+                let row = [];
+                let inQuotes = false;
+                let val = '';
+                for (let i = 0; i < text.length; i++) {
+                    let char = text[i];
+                    let nextChar = text[i+1];
+                    if (char === '"' && inQuotes && nextChar === '"') {
+                        val += '"'; i++;
+                    } else if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        row.push(val); val = '';
+                    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+                        if (char === '\r' && nextChar === '\n') i++; 
+                        row.push(val); rows.push(row); row = []; val = '';
+                    } else {
+                        val += char;
+                    }
+                }
+                if (val || row.length > 0) { row.push(val); rows.push(row); }
+                
+                if (rows.length < 2) return showStatus("ไฟล์ CSV ไม่มีข้อมูลเพียงพอ");
+                
+                const headers = rows[0].map(h => h.trim());
+                let count = 0;
+                let batch = writeBatch(db);
+                let operations = 0;
+
+                for (let i = 1; i < rows.length; i++) {
+                    if (rows[i].length === 0 || (rows[i].length === 1 && !rows[i][0])) continue;
+                    const data = {};
+                    let hasData = false;
+                    headers.forEach((h, index) => {
+                        let cellValue = rows[i][index];
+                        if (cellValue !== undefined && h) {
+                            data[h] = cellValue;
+                            hasData = true;
+                        }
+                    });
+                    
+                    if (hasData) {
+                        const docId = data.id || data.docId || `${collectionName.charAt(0).toUpperCase()}I${Date.now()}_${i}`;
+                        delete data.id;
+                        delete data.docId;
+                        
+                        batch.set(doc(collection(db, 'artifacts', appId, 'public', 'data', collectionName), docId), data, { merge: true });
+                        count++;
+                        operations++;
+                        
+                        if (operations >= 490) {
+                            await batch.commit();
+                            batch = writeBatch(db);
+                            operations = 0;
+                        }
+                    }
+                }
+                
+                if (operations > 0) await batch.commit();
+                
+                logAction(`IMPORT_${collectionName.toUpperCase()}`, `นำเข้า/อัปเดต ข้อมูลจำนวน ${count} รายการ`);
+                showStatus(`ดำเนินการนำเข้าข้อมูล ${count} รายการเสร็จสิ้น`);
+            };
+
+            // Export to CSV Function
+            const exportToCSV = (data, filename) => {
+                if (!data || data.length === 0) { showStatus("ไม่มีข้อมูลสำหรับส่งออก"); return; }
+                const headers = Object.keys(data[0]); 
+                const csvContent = [
+                    headers.join(','),
+                    ...data.map(row => headers.map(h => `"${(row[h] || '').toString().replace(/"/g, '""')}"`).join(','))
+                ].join('\n');
+                const blob = new Blob(["\ufeff", csvContent], { type: 'text/csv;charset=utf-8;' }); 
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `${filename}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            // Local Import CSV
+            const handleImportCSV = (e, collectionName) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                showStatus("กำลังอ่านและนำเข้าข้อมูล...");
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        await processCSVText(event.target.result, collectionName);
+                    } catch (err) {
+                        console.error(err);
+                        showStatus("เกิดข้อผิดพลาดในการนำเข้าข้อมูล โปรดตรวจสอบรูปแบบไฟล์ CSV");
+                    }
+                    e.target.value = null;
+                };
+                reader.readAsText(file);
+            };
+
+            // Sync from Google Sheet Function
+            const importFromGoogleSheet = async (sheetName) => {
+                if(!confirm(`ยืนยันการดึงข้อมูลจาก Google Sheet แผ่นงาน: ${sheetName} ?\n(แผ่นงานต้นทางต้องเปิดแชร์สาธารณะ)`)) return;
+                showStatus(`กำลังเชื่อมต่อ Google Sheet (${sheetName})...`);
+                try {
+                    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${sheetName}`;
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error("ไม่สามารถอ่านข้อมูลได้");
+                    const csvText = await response.text();
+                    
+                    if (csvText.startsWith("<!DOCTYPE html>")) throw new Error("ไม่ได้รับอนุญาตให้เข้าถึง Sheet โปรดตั้งค่า Share เป็น Anyone with the link");
+                    
+                    await processCSVText(csvText, sheetName);
+                } catch (err) {
+                    console.error(err);
+                    showStatus("เกิดข้อผิดพลาด: " + err.message);
+                }
+            };
+
+            // Setup Real-time clock
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const formatDateTime = (date) => {
+                const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+                const h = String(date.getHours()).padStart(2, '0');
+                const m = String(date.getMinutes()).padStart(2, '0');
+                const s = String(date.getSeconds()).padStart(2, '0');
+                return `GMT+7 วัน${days[date.getDay()]}ที่ ${date.getDate()} ${months[date.getMonth()]} พ.ศ. ${date.getFullYear() + 543} เวลา ${h}.${m}.${s}`;
+            };
+
+            useEffect(() => {
+                signInAnonymously(auth).catch(e => console.warn("Anonymous Auth Disabled", e));
+
+                const baseRef = (col) => collection(db, 'artifacts', appId, 'public', 'data', col);
+                
+                const unsubS = onSnapshot(baseRef('seminar'), s => setSeminar(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.warn(e));
+                const unsubG = onSnapshot(baseRef('guests'), s => setGuests(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.warn(e));
+                const unsubR = onSnapshot(baseRef('rooms'), s => setRooms(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.warn(e));
+                const unsubL = onSnapshot(baseRef('logs'), s => setLogs(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.warn(e));
+                
+                const unsubU = onSnapshot(baseRef('units'), s => {
+                    const data = s.docs.map(d => ({docId: d.id, ...d.data()}));
+                    setUnits(data.sort((a, b) => parseInt(a.id || "0") - parseInt(b.id || "0")));
+                }, (err) => {
+                    console.error("Units Error:", err);
+                    showStatus("⚠️ ไม่สามารถดึงข้อมูลหน่วยได้: กรุณาปลดล็อค Firebase Rules");
+                });
+                
+                const unsubA = onSnapshot(baseRef('admins'), (s) => {
+                    const data = s.docs.map(d => ({id: d.id, ...d.data()}));
+                    setAdmins(data);
+                    
+                    if (data.length === 0) {
+                        setDoc(doc(baseRef('admins'), 'admin_default'), { 
+                            name: 'Super Admin', username: 'admin', password: 'password', roles: ['SUPER_ADMIN'] 
+                        }).catch(e => console.warn(e));
+                    }
+                    setIsDataLoaded(true);
+                }, (err) => {
+                    console.error("Admins Error:", err);
+                    setIsDataLoaded(true);
+                    setLoginError("⚠️ ติดปัญหา Firebase Rules ทำให้ตรวจสอบรหัสผ่านไม่ได้");
+                });
+                
+                return () => { unsubS(); unsubG(); unsubR(); unsubU(); unsubA(); unsubL(); };
+            }, []);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (!isDataLoaded) { setLoginError("กำลังเชื่อมต่อเซิร์ฟเวอร์..."); return; }
+                
+                const u = loginForm.username.trim();
+                const p = loginForm.password.trim();
+                const matched = admins.find(a => String(a.username) === u && String(a.password) === p);
+                
+                if (matched) { 
+                    setAdminProfile(matched); 
+                    setIsLoginView(false); 
+                    setLoginError("");
+                    logAction("LOGIN", matched.name); 
+                } else if (u === 'admin' && p === 'password') {
+                    setAdminProfile({ name: 'Super Admin (Offline Mode)', username: 'admin', roles: ['SUPER_ADMIN'] });
+                    setIsLoginView(false);
+                    setLoginError("");
+                    showStatus("เข้าสู่ระบบด้วยสิทธิ์ผู้ดูแลฉุกเฉิน");
+                } else {
+                    setLoginError("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
+                }
+            };
+
+            const handleNav = (sheet) => {
+                setIsLoginView(false); 
+                setActiveSheet(sheet);
+            };
+
+            const seedUnits = async () => {
+                if (isSeedingRef.current) return;
+                isSeedingRef.current = true;
+                showStatus("กำลังกู้คืนข้อมูลหน่วยงาน 297 หน่วย...");
+                
+                try {
+                    const raw = `001 : ส.พัน.21 ทภ.1 | 002 : ร้อย.ฝรพ.1 | 003 : ร.31 รอ. | 004 : ร.31 พัน.1 รอ. | 005 : ร.31 พัน.2 รอ. | 006 : ร.31 พัน.3 รอ. | 007 : ม.พัน.4 | 008 : ป.1 พัน.1 รอ. | 009 : ป.1 พัน.11 รอ. | 010 : ป.1 พัน.31 รอ. | 011 : ช.พัน.1 | 012 : ส.พัน.1 | 013 : ส.พัน.2 | 014 : ม.พัน.3 | 015 : ช.พัน.2 | 016 : พัน.ซบร.กรม สน.2 | 017 : ร.2 รอ. | 018 : ร.2 พัน.1 รอ. | 019 : ร.2 พัน.2 รอ. | 020 : ร.2 พัน.3 รอ. | 021 : ร.12 พัน.1 รอ. | 022 : ร.12 พัน.2 รอ. | 023 : ร.12 พัน.3 รอ. | 024 : ร.902 รอ. | 025 : ร.902 พัน.1 รอ. | 026 : ร.902 พัน.2 รอ. | 027 : ร.902 พัน.3 รอ. | 028 : ป.2 พัน.2 รอ. | 029 : ป.2 พัน.12 รอ. | 030 : ป.2 พัน.902 รอ. | 031 : ป.2 พัน.102 รอ. | 032 : ม.1 พัน.1 รอ. | 033 : ม.1 พัน.3 รอ. | 034 : ม.1 พัน.17 รอ. | 035 : ม.พัน.29 รอ. | 036 : ส.พัน.12 | 037 : ม.4 พัน.5 รอ. | 038 : ม.4 พัน.11 รอ. | 039 : ม.4 พัน.25 รอ. | 040 : ม.5 พัน.20 รอ. | 041 : ม.5 พัน.23 รอ. | 042 : ม.5 พัน.24 รอ. | 043 : ม.พัน.27 | 044 : พัน.ซบร.กรม สน.12 | 045 : ร.9 พัน.1 | 046 : ร.9 พัน.2 | 047 : ร.9 พัน.3 | 048 : ร.19 พัน.1 | 049 : ร.19 พัน.2 | 050 : ร.19 พัน.3 | 051 : ร.29 พัน.1 | 052 : ร.29 พัน.2 | 053 : ร.29 พัน.3 | 054 : ป.9 พัน.9 | 055 : ป.9 พัน.19 | 056 : ป.9 พัน.109 | 057 : พัน.ซบร.กรม สน.พล.ร.9 | 058 : พัน.ขส.กรม สน.พล.ร.9 | 059 : ม.พัน.19 พล.ร.9 | 060 : ช.พัน.9 พล.ร.9 | 061 : ส.พัน.9 พล.ร.9 | 062 : ร.111 พัน.1 | 063 : ร.111 พัน.2 | 064 : ร.111 พัน.3 | 065 : ร.112 พัน.1 | 066 : ร.112 พัน.2 | 067 : ร.112 พัน.3 | 068 : พัน.ซบร.กรม สน.พล.ร.11 | 069 : พัน.พัฒนา 1 | 070 : ช.1 พัน.112 | 071 : ช.1 พัน.52 | 072 : พัน.สพ.กระสุน 21 บชร.1 | 073 : พัน.สบร.21 บชร.1 | 074 : พัน.ร.มทบ.11 (1) | 075 : พัน.ร.มทบ.11 (2) | 076 : พัน.ร.มทบ.11 (3) | 077 : มทบ.12 (1) | 078 : มทบ.12 (2) | 079 : มทบ.13 | 080 : มทบ.14 | 081 : พัน.มทบ.15 | 082 : มทบ.16 | 083 : มทบ.17 | 084 : มทบ.18 | 085 : มทบ.19 | 086 : รพ.ค่ายสุรนารี | 087 : ส.พัน.22 ทภ.2 | 088 : ส.พัน.3 พล.ร.3 | 089 : ร.3 พัน.1 | 090 : ร.3 พัน.2 | 091 : ร.3 พัน.3 | 092 : ร.8 พัน.1 | 093 : ร.8 พัน.2 | 094 : ร.8 พัน.3 | 095 : ร.13 พัน.1 | 096 : ร.13 พัน.2 | 097 : ร.13 พัน.3 | 098 : ป.3 พัน.3 | 099 : ป.3 พัน.8 | 100 : ป.3 พัน.13 | 101 : ป.3 พัน.103 | 102 : ช.พัน.3 พล.ร.3 | 103 : ม.พัน.8 พล.ร.3 | 104 : ส.พัน.6 พล.ร.6 | 105 : ร.6 | 106 : ร.6 พัน.1 | 107 : ร.6 พัน.2 | 108 : ร.6 พัน.3 | 109 : ร.16 พัน.1 | 110 : ร.16 พัน.2 | 111 : ร.16 พัน.3 | 112 : ร.23 | 113 : ร.23 พัน.1 | 114 : ร.23 พัน.3 | 115 : ร.23 พัน.4 | 116 : ม.พัน.21 พล.ร.6 | 117 : ป.6 พัน.6 | 118 : ป.6 พัน.16 | 119 : ป.6 พัน.23 | 120 : ป.6 พัน.106 | 121 : ช.พัน.6 พล.ร.6 | 122 : ม.6 พัน.6 | 123 : ม.7 พัน.14 | 124 : พัน.พัฒนา 2 | 125 : ช.2 พัน.201 | 126 : ช.2 พัน.202 | 127 : พัน.สบร.22 บชร.2 | 128 : พัน.ซบร.22 บชร.2 | 129 : พัน.สพ.กระสุน 22 บชร.2 | 130 : พัน.ร.มทบ.21 | 131 : มทบ.22 | 132 : พัน.มทบ.23 | 133 : มทบ.24 | 134 : มทบ.25 | 135 : มทบ.26 | 136 : มทบ.27 | 137 : มทบ.28 | 138 : มทบ.29 | 139 : มทบ.210 | 140 : ส.พัน.23 ทภ.3 | 141 : ร.4 พัน.1 | 142 : ร.4 พัน.2 | 143 : ร.4 พัน.3 | 144 : ร.14 พัน.1 | 145 : ร.14 พัน.2 | 146 : ร.14 พัน.3 | 147 : ม.พัน.9 พล.ร.4 | 148 : ป.4 พัน.104 | 149 : ส.พัน.4 พล.ร.4 | 150 : ร.7 | 151 : ร.7 พัน.1 | 152 : ร.7 พัน.2 | 153 : ร.7 พัน.5 | 154 : ป.4 พัน.7 | 155 : ป.4 พัน.17 | 156 : ป.4 พัน.4 | 157 : ร.17 | 158 : ร.17 พัน.2 | 159 : ร.17 พัน.3 | 160 : ร.17 พัน.4 | 161 : ม.3 | 162 : ม.2 พัน.7 | 163 : ม.2 พัน.10 | 164 : ม.2 พัน.15 | 165 : ม.3 พัน.13 | 166 : ม.3 พัน.18 | 167 : ม.3 พัน.26 | 168 : ม.พัน.12 พล.ม.1 | 169 : ม.พัน.28 พล.ม.1 | 170 : ช.พัน.8 พล.ม.1 | 171 : ส.พัน.11 พล.ม.1 | 172 : ป.21 พัน.20 | 173 : ป.21 พัน.30 | 174 : พัน.พัฒนา 3 | 175 : ช.3 พัน.302 | 176 : ร้อย.บก.บชร.3 | 177 : พัน.สบร.23 บชร.3 | 178 : พัน.ซบร.23 บชร.3 | 179 : พัน.สพ.กระสุน 23 บชร.3 | 180 : มทบ.31 | 181 : มทบ.32 | 182 : มทบ.33 | 183 : พัน.มทบ.33 | 184 : มทบ.34 | 185 : มทบ.35 | 186 : มทบ.36 | 187 : มทบ.37 | 188 : มทบ.38 | 189 : มทบ.39 | 190 : มทบ.310 | 191 : ส.พัน.24 ทภ.4 | 192 : ร.5 พัน.1 | 193 : ร.5 พัน.2 | 194 : ร.5 พัน.3 | 195 : ร.15 พัน.1 | 196 : ร.15 พัน.2 | 197 : ร.15 พัน.4 | 198 : ร.25 พัน.1 | 199 : ร.25 พัน.2 | 200 : ร.25 พัน.3 | 201 : ม.พัน.16 พล.ร.5 | 202 : ป.5 พัน.5 | 203 : ป.5 พัน.15 | 204 : ป.5 พัน.25 | 205 : ป.5 พัน.105 | 206 : ช.พัน.5 พล.ร.5 | 207 : ส.พัน.5 พล.ร.5 | 208 : ร.151 พัน.1 | 209 : ร.151 พัน.2 | 210 : ร.151 พัน.3 | 211 : ร.152 พัน.1 | 212 : ร.152 พัน.2 | 213 : ร.152 พัน.3 | 214 : ร.153 พัน.1 | 215 : ร.153 พัน.2 | 216 : ร.153 พัน.3 | 217 : ม.พัน.31 พล.ร.15 | 218 : ช.พัน.15 พล.ร.15 | 219 : พัน.ซบร.กรม.สน.พล.ร.15 | 220 : พัน.สร.กรม.สน.พล.ร.15 | 221 : พัน.พัฒนา 4 | 222 : ช.พัน.401 พล.พัฒนา 4 | 223 : ช.พัน.402 พล.พัฒนา 4 | 224 : พัน.สบร.24 บชร.4 | 225 : พัน.ซบร.24 บชร.4 | 226 : พัน.สพ.กระสุน 24 บชร.4 | 227 : มทบ.41 | 228 : พัน.มทบ.42 | 229 : มทบ. 43 | 230 : มทบ.44 | 231 : มทบ.45 | 232 : มทบ.46 | 233 : ปตอ.1 พัน.3 | 234 : ปตอ.1 พัน.5 | 235 : ปตอ.1 พัน.6 | 236 : ปตอ.1 พัน.7 | 237 : ปตอ.2 พัน.1 | 238 : ปตอ.2 พัน.2 | 239 : ปตอ.2 พัน.4 | 240 : ศปภอ.ทบ.1 | 241 : พัน.ปจว. | 242 : รพศ.1 | 243 : รพศ.2 | 244 : รพศ.3 | 245 : รพศ.4 | 246 : รพศ.5 | 247 : ร้อย.บร.กบร.ศสพ. (1) | 248 : ร้อย.บร.กบร.ศสพ. (2) | 249 : พัน.ร.นรด. | 250 : ศสร. | 251 : ป.71 พัน.712 | 252 : ป.71 พัน.713 | 253 : ป.72 พัน.722 | 254 : ป.72 พัน.723 | 255 : ส.1 พัน.101 | 256 : ส.1 พัน.102 | 257 : พัน.นร.รร.ส.สส. | 258 : พัน.ส.ซบร.เขตหลัง | 259 : พัน.บร.กบร.กช. (1) | 260 : พัน.บร.กบร.กช. (2) | 261 : ช.11 พัน.111 | 262 : ช.21 | 263 : ช.พัน.51 | 264 : ช.11 พัน.602 | 265 : พัน.ช.คมศ.พล.ช. | 266 : พัน.บ.1 กรม.บ. (1) | 267 : พัน.บ.21 กรม.บ. (2) | 268 : พัน.บ.3 กรม.บ. (3) | 269 : พัน.บร.กบร.ศบบ. | 270 : พัน.ปฐบ. | 271 : พัน.นร.รร.ขส.ขส.ทบ. | 272 : กรม ขส. | 273 : ร้อย.บร.กบร.สนท.พธ.ทบ. | 274 : กวรบ.ศอ.สพ.ทบ. | 275 : พัน.นร.รร.สพ.สพ.ทบ. | 276 : กส.ทบ. | 277 : พัน.สต.กส.ทบ. | 278 : พัน.สท.กส.ทบ. | 279 : ร้อย.พล.สร.รพ.รร.6 | 280 : ร้อย.พล.สร.รพ.อ.ป.ร. | 281 : พัน.ร.รร.จปร. (1) | 282 : พัน.ร.รร.จปร. (2) | 283 : ศร.พัน.1 | 284 : ศร.พัน.2 | 285 : พัน.บร.กบร.ศร. (1) | 286 : พัน.บร.กบร.ศร. (2) | 287 : กรม นร.รร.ม.ศร. | 288 : พัน.บร.กบร.ศม. | 289 : กรม นร.รร.ม.ศม. | 290 : ม.พัน.22 ศม. | 291 : พัน.ป.ศป. | 292 : พัน.บร.กบร.ศป. (1) | 293 : พัน.บก.กบร.ศป. (2) | 294 : พัน.บร.กบร.ศป. (3) | 295 : รร.นส.ทบ. (1) | 296 : รร.นส.ทบ. (2) | 297 : ศฝยว.ทบ.`;
+                    const items = raw.split(' | ');
+                    const unitsCol = collection(db, 'artifacts', appId, 'public', 'data', 'units');
+                    
+                    const batchSize = 100;
+                    for (let i = 0; i < items.length; i += batchSize) {
+                        const batch = writeBatch(db);
+                        const slice = items.slice(i, i + batchSize);
+                        slice.forEach(item => {
+                            const parts = item.split(' : ');
+                            if (parts.length < 2) return;
+                            const id = parts[0].trim();
+                            const name = parts[1].trim();
+                            
+                            let region = 'นขต.ทบ.';
+                            const idNum = parseInt(id);
+                            if (idNum <= 85) region = 'ทภ.1';
+                            else if (idNum <= 139) region = 'ทภ.2';
+                            else if (idNum <= 190) region = 'ทภ.3';
+                            else if (idNum <= 232) region = 'ทภ.4';
+                            
+                            const unitRef = doc(unitsCol, id);
+                            batch.set(unitRef, { id, name, region });
+                        });
+                        await batch.commit();
+                    }
+                    showStatus("กู้คืนฐานข้อมูลหน่วยงาน 297 หน่วยสำเร็จ");
+                    logAction("RESTORE_UNITS", "System Restore Units 297 records");
+                } catch (error) {
+                    console.error("SeedUnits Error:", error);
+                    showStatus("⚠️ ไม่สามารถบันทึกหน่วยได้: กรุณาตรวจสอบ Firebase Rules");
+                } finally {
+                    isSeedingRef.current = false;
+                }
+            };
+
+            const generateMockData = async () => {
+                if(!confirm("ยืนยันการสร้างข้อมูลตัวอย่างสำหรับการทดสอบ?")) return;
+                showStatus("กำลังสร้างข้อมูลจำลอง...");
+                try {
+                    const b = writeBatch(db);
+                    const nowStr = getGSheetTimestamp();
+                    for(let i=1; i<=15; i++) {
+                        const rName = MOCK_NAMES[Math.floor(Math.random() * MOCK_NAMES.length)];
+                        const rLName = MOCK_LASTNAMES[Math.floor(Math.random() * MOCK_LASTNAMES.length)];
+                        b.set(doc(collection(db, 'artifacts', appId, 'public', 'data', 'seminar'), `MOCK_S_${Date.now()}_${i}`), { 
+                            ...INITIAL_SEMINAR_FORM, rank: RANKS[i%RANKS.length], firstName: rName, lastName: rLName, 
+                            phone: `081${String(Math.floor(Math.random()*9000000 + 1000000))}`, region: 'ทภ.1', unitName: '001 : ส.พัน.21 ทภ.1',
+                            createdAt: nowStr, updatedAt: nowStr
+                        });
+                    }
+                    for(let i=1; i<=5; i++) {
+                        const rName = MOCK_NAMES[Math.floor(Math.random() * MOCK_NAMES.length)];
+                        b.set(doc(collection(db, 'artifacts', appId, 'public', 'data', 'guests'), `MOCK_G_${Date.now()}_${i}`), { 
+                            rank: RANKS[0], firstName: rName, lastName: 'บัญชาการ', category: 'กองอำนวยการ', position: 'ฝ่ายเสธ.', unit: 'สยศ.ทบ.', phone: '0998887777',
+                            createdAt: nowStr, updatedAt: nowStr
+                        });
+                    }
+                    for(let i=1; i<=5; i++) {
+                        b.set(doc(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), `MOCK_R_${Date.now()}_${i}`), { roomNo: `A10${i}`, type: 'พักรวม', status: 'ว่าง', statusOther: '', isLocked: false });
+                    }
+                    await b.commit();
+                    logAction("ADD_MOCK", "Generate Mock Data");
+                    showStatus("สร้างข้อมูลจำลองสำเร็จ");
+                } catch(e) { console.error(e); showStatus("เกิดข้อผิดพลาดในการสร้างข้อมูล"); }
+            };
+
+            const deleteMockData = async () => {
+                if(!confirm("ยืนยันการลบข้อมูลตัวอย่างทั้งหมด? (จะไม่กระทบข้อมูลจริง)")) return;
+                showStatus("กำลังลบข้อมูลจำลอง...");
+                try {
+                    const b = writeBatch(db);
+                    [...seminar, ...guests, ...rooms].filter(i => i.id.startsWith('MOCK_')).forEach(item => {
+                        const col = item.id.startsWith('MOCK_S') ? 'seminar' : item.id.startsWith('MOCK_G') ? 'guests' : 'rooms';
+                        b.delete(doc(collection(db, 'artifacts', appId, 'public', 'data', col), item.id));
+                    });
+                    await b.commit();
+                    logAction("DEL_MOCK", "Delete Mock Data");
+                    showStatus("ลบข้อมูลจำลองสำเร็จ");
+                } catch(e) { console.error(e); showStatus("เกิดข้อผิดพลาดในการลบข้อมูล"); }
+            };
+
+            const saveSeminar = async (e) => {
+                e.preventDefault();
+                const id = isEditMode ? currentEditItem.id : "S" + Date.now();
+                const nowTime = getGSheetTimestamp();
+                const payload = { ...seminarForm, updatedAt: nowTime };
+                if (!isEditMode) payload.createdAt = nowTime;
+                
+                await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'seminar'), id), payload);
+                setIsSeminarModalOpen(false);
+                logAction(isEditMode ? "EDIT_SEMINAR" : "ADD_SEMINAR", payload.firstName);
+                showStatus("บันทึกข้อมูลเรียบร้อย");
+            };
+
+            const saveGuest = async (e) => {
+                e.preventDefault();
+                const id = isEditMode ? currentEditItem.id : "G" + Date.now();
+                const nowTime = getGSheetTimestamp();
+                const payload = { ...guestForm, updatedAt: nowTime };
+                if (!isEditMode) payload.createdAt = nowTime;
+
+                await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'guests'), id), payload);
+                setIsGuestModalOpen(false);
+                logAction(isEditMode ? "EDIT_GUEST" : "ADD_GUEST", payload.firstName);
+                showStatus("บันทึกข้อมูลเรียบร้อย");
+            };
+
+            const saveAdmin = async (e) => {
+                e.preventDefault();
+                const id = isEditMode ? currentEditItem.id : "A" + Date.now();
+                await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'admins'), id), adminForm);
+                setIsAdminModalOpen(false);
+                logAction(isEditMode ? "EDIT_ADMIN" : "ADD_ADMIN", adminForm.username);
+                showStatus("บันทึกแอดมินเรียบร้อย");
+            };
+
+            const saveUnit = async (e) => {
+                e.preventDefault();
+                const id = isEditMode ? currentEditItem.docId : unitForm.id;
+                await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'units'), id), unitForm);
+                setIsUnitModalOpen(false);
+                logAction(isEditMode ? "EDIT_UNIT" : "ADD_UNIT", unitForm.name);
+                showStatus("บันทึกฐานข้อมูลหน่วยแล้ว");
+            };
+
+            const saveRoom = async (e) => {
+                e.preventDefault();
+                const id = isEditMode ? currentEditItem.id : "R" + Date.now();
+                await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), id), roomForm);
+                setIsRoomModalOpen(false);
+                logAction(isEditMode ? "EDIT_ROOM" : "ADD_ROOM", roomForm.roomNo);
+                showStatus("บันทึกห้องพักแล้ว");
+            }
+
+            const toggleRoomLock = async (roomId, currentStatus) => {
+                if (!hasPermission('ACCOMMODATION')) return;
+                await updateDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), roomId), { isLocked: !currentStatus });
+                logAction(currentStatus ? "UNLOCK_ROOM" : "LOCK_ROOM", `Room ID: ${roomId}`);
+                showStatus(currentStatus ? "ปลดล็อคห้องเพื่อแก้ไขแล้ว" : "ล็อคจัดเก็บห้องเรียบร้อย");
+            };
+
+            const assignRoom = async (personId, roomId, type) => {
+                if (!hasPermission('ACCOMMODATION')) return;
+                
+                await updateDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', type), personId), { roomId });
+                logAction("ASSIGN_ROOM", `ID: ${personId} TO Room ID: ${roomId || 'NONE'}`);
+            };
+
+            const filteredSeminar = seminar.filter(i => (i.firstName + i.lastName + (i.unitName||'')).toLowerCase().includes(searchTerm.toLowerCase()));
+            const filteredUnits = units.filter(u => (unitRegionFilter === 'All' || u.region === unitRegionFilter) && ((u.id||"") + (u.name||"")).toLowerCase().includes(unitSearchTerm.toLowerCase()));
+
+            return (
+                <div className="min-h-screen flex flex-col relative">
+                    
+                    {/* Sticky Container for Header & Time Bar */}
+                    <div className="sticky top-0 z-[60] w-full flex flex-col shadow-xl">
+                        <header className="bg-slate-900 text-white p-4 flex flex-col lg:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleNav('seminar')}>
+                                <div className="bg-indigo-600 p-2 rounded-lg"><Icon name="shield" size={20} /></div>
+                                <div className="text-left leading-none">
+                                    <h1 className="text-lg font-bold uppercase tracking-tight leading-none">MILITARY PORTAL</h1>
+                                    <p 
+                                        className={`text-[9px] text-indigo-300 font-bold uppercase tracking-widest mt-1 ${adminProfile ? 'cursor-pointer hover:text-white transition-colors' : ''}`}
+                                        onClick={() => { if(adminProfile) setIsChangelogOpen(true); }}
+                                    >
+                                        v12.1.4a STABLE
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-white/5 overflow-x-auto no-scrollbar max-w-full">
+                                <button onClick={() => handleNav('seminar')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'seminar' ? 'tab-active' : 'text-slate-400'}`}>สัมมนา</button>
+                                {adminProfile && <button onClick={() => handleNav('accommodation')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'accommodation' ? 'tab-active' : 'text-slate-400'}`}>จัดการที่พัก</button>}
+                                <button onClick={() => handleNav('units')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'units' ? 'tab-active' : 'text-slate-400'}`}>ฐานข้อมูลหน่วย</button>
+                                {hasPermission('SUPER_ADMIN') && <button onClick={() => handleNav('admin_mgmt')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'admin_mgmt' ? 'tab-active' : 'text-slate-400'}`}>จัดการระบบ</button>}
+                                <div className="w-[1px] h-4 bg-slate-700 mx-2 shrink-0"></div>
+                                {!adminProfile ? 
+                                    <button onClick={() => setIsLoginView(true)} className="px-4 py-2 bg-white/10 text-white rounded-lg text-[10px] font-bold uppercase border border-white/10 hover:bg-white/20">Login</button> :
+                                    <div className="flex items-center gap-3 ml-2 pr-2">
+                                        <div className="flex flex-col items-end leading-none">
+                                            <span className="text-[10px] font-bold text-white">{adminProfile.name}</span>
+                                            <div className="mt-1">{(adminProfile.roles || []).map(r => <span key={r} className={`role-tag ${ROLES_CONFIG[r]?.color}`}>{ROLES_CONFIG[r]?.label}</span>)}</div>
+                                        </div>
+                                        <button onClick={() => { setAdminProfile(null); handleNav('seminar'); }} className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"><Icon name="log-out" size={16} /></button>
+                                    </div>
+                                }
+                            </div>
+                        </header>
+                        
+                        <div className="bg-slate-800 text-slate-300 text-center py-1.5 text-[10px] font-bold tracking-widest border-b border-slate-700 w-full">
+                            {formatDateTime(currentTime)}
+                        </div>
+                    </div>
+
+                    <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+                        {isLoginView ? (
+                            <div className="max-w-md mx-auto bg-white p-12 rounded-[2rem] shadow-2xl mt-12 animate-in zoom-in text-left border">
+                                <h2 className="text-2xl font-black text-center mb-8 uppercase text-slate-800 leading-none">Admin Login</h2>
+                                {loginError && <div className="mb-4 p-3 bg-rose-50 text-rose-500 text-[10px] font-bold rounded-xl text-center">{loginError}</div>}
+                                <form onSubmit={handleLogin} className="space-y-6">
+                                    <Field label="Username"><input className="input-field font-mono" required value={loginForm.username} onChange={e=>setLoginForm({...loginForm, username: e.target.value})} /></Field>
+                                    <Field label="Password"><input type="password" className="input-field font-mono" required value={loginForm.password} onChange={e=>setLoginForm({...loginForm, password: e.target.value})} /></Field>
+                                    <button disabled={!isDataLoaded} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg uppercase text-sm tracking-widest leading-none disabled:opacity-50">
+                                        {isDataLoaded ? "เข้าสู่ระบบ" : "กำลังตรวจสอบการเชื่อมต่อ..."}
+                                    </button>
+                                </form>
+                                <button onClick={() => setIsLoginView(false)} className="w-full mt-4 text-[10px] font-bold text-slate-300 uppercase text-center hover:text-indigo-500">กลับสู่หน้าหลัก</button>
+                            </div>
+                        ) : activeSheet === 'units' ? (
+                            <div className="space-y-6 animate-in slide-in-from-bottom-5">
+                                <div className="flex flex-col lg:flex-row justify-between gap-4 items-center">
+                                    <div className="flex flex-wrap gap-2">
+                                        <button onClick={()=>setUnitRegionFilter('All')} className={`btn-filter ${unitRegionFilter === 'All' ? 'active' : ''}`}>ทั้งหมด</button>
+                                        {REGIONS_LIST.map(r => (<button key={r} onClick={()=>setUnitRegionFilter(r)} className={`btn-filter ${unitRegionFilter === r ? 'active' : ''}`}>{r}</button>))}
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">ฐานข้อมูล: {units.length} หน่วยงาน</span>
+                                        {adminProfile && (
+                                            <button onClick={() => { setIsEditMode(false); setUnitForm({id: '', region: 'ทภ.1', name: ''}); setIsUnitModalOpen(true); }} className="bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"><Icon name="plus" size={14} /> เพิ่มหน่วย</button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="relative">
+                                    <Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none font-bold text-sm focus:border-indigo-500 transition-all" placeholder="ค้นหารหัส หรือ ชื่อหน่วยงาน..." value={unitSearchTerm} onChange={e=>setUnitSearchTerm(e.target.value)} />
+                                </div>
+                                <div className="bg-white rounded-3xl shadow-xl border overflow-hidden max-h-[60vh] overflow-y-auto no-scrollbar">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10">
+                                            <tr><th className="px-8 py-5">รหัส</th><th className="px-8 py-5">สังกัด</th><th className="px-8 py-5">ชื่อหน่วยงาน</th>{adminProfile && <th className="px-8 py-5 text-right">จัดการ</th>}</tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {filteredUnits.map((u, i)=>(
+                                                <tr key={u.docId || i} className="hover:bg-indigo-50/50 transition-colors">
+                                                    <td className="px-8 py-4 font-mono font-bold text-slate-400">{u.id}</td>
+                                                    <td className="px-8 py-4"><span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 font-black text-[10px] border border-indigo-100">{u.region}</span></td>
+                                                    <td className="px-8 py-4 font-bold text-slate-800">{u.name}</td>
+                                                    {adminProfile && (
+                                                        <td className="px-8 py-4 text-right flex justify-end gap-1">
+                                                            <button onClick={()=>{setIsEditMode(true); setCurrentEditItem(u); setUnitForm(u); setIsUnitModalOpen(true)}} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Icon name="edit-2" size={14} /></button>
+                                                            <button onClick={async ()=>{if(confirm(`ยืนยันลบหน่วยงาน ${u.name} ใช่หรือไม่?`)) { await deleteDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'units'), u.docId)); logAction("DELETE_UNIT", u.name); }}} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Icon name="trash-2" size={14} /></button>
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            ))}
+                                            {filteredUnits.length === 0 && (
+                                                <tr><td colSpan={adminProfile ? "4" : "3"} className="p-20 text-center text-slate-200 font-bold uppercase italic opacity-30 tracking-widest">ไม่พบข้อมูล หรืออาจกำลังรอเชื่อมต่อ...</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ) : activeSheet === 'accommodation' ? (
+                            <div className="space-y-6 animate-in fade-in duration-500 text-left">
+                                <div className="flex gap-6 border-b border-slate-200 mb-6">
+                                    <button onClick={()=>setAccSubTab('manage')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all ${accSubTab === 'manage' ? 'subtab-active' : 'text-slate-400'}`}>จัดที่พัก</button>
+                                    <button onClick={()=>setAccSubTab('staff')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all ${accSubTab === 'staff' ? 'subtab-active' : 'text-slate-400'}`}>กองอำนวยการ</button>
+                                    <button onClick={()=>setAccSubTab('rooms')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all ${accSubTab === 'rooms' ? 'subtab-active' : 'text-slate-400'}`}>จัดการห้อง</button>
+                                </div>
+                                {accSubTab === 'manage' ? (() => {
+                                    const filteredAccRooms = rooms.filter(room => {
+                                        if (!accRoomSearchTerm) return true;
+                                        const searchLower = accRoomSearchTerm.toLowerCase();
+                                        if (room.roomNo.toLowerCase().includes(searchLower)) return true;
+                                        const occupants = [...seminar.map(s=>({...s, type:'seminar'})), ...guests.map(g=>({...g, type:'guests'}))].filter(x => x.roomId === room.id);
+                                        return occupants.some(occ =>
+                                            ((occ.rank === 'อื่นๆ' ? (occ.rankOther || '') : occ.rank) + occ.firstName + occ.lastName + (occ.nickname||'') + (occ.unitName||occ.category||'')).toLowerCase().includes(searchLower)
+                                        );
+                                    });
+
+                                    const lockedRooms = filteredAccRooms.filter(r => r.isLocked);
+                                    const unlockedRooms = filteredAccRooms.filter(r => !r.isLocked);
+
+                                    return (
+                                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                                        <div className="lg:col-span-8 space-y-4">
+                                            {/* Search Bar for Rooms */}
+                                            <div className="relative">
+                                                <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <input
+                                                    className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:border-indigo-500 font-bold text-sm transition-all"
+                                                    placeholder="ค้นหาห้องพัก, ชื่อผู้เข้าพัก, หน่วยงาน..."
+                                                    value={accRoomSearchTerm}
+                                                    onChange={e => setAccRoomSearchTerm(e.target.value)}
+                                                />
+                                            </div>
+
+                                            {/* Locked Rooms Section */}
+                                            {lockedRooms.length > 0 && (
+                                                <div className="bg-slate-50 p-4 rounded-2xl border shadow-inner flex flex-wrap gap-2 items-center">
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2 flex items-center gap-1"><Icon name="lock" size={12}/> ห้องที่จัดเสร็จแล้ว</span>
+                                                    {lockedRooms.map(room => (
+                                                        <button key={room.id} onClick={() => toggleRoomLock(room.id, true)} title="คลิกเพื่อปลดล็อคและแก้ไข" className="px-3 py-1.5 bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl text-[10px] font-black flex items-center gap-1.5 transition-all border border-slate-200 hover:border-rose-200 shadow-sm">
+                                                            <Icon name="lock" size={12} className="text-emerald-500"/> ห้อง {room.roomNo}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {/* Unlocked Rooms Grid */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {unlockedRooms.map(room => {
+                                                    const occupants = [...seminar.map(s=>({...s, type:'seminar'})), ...guests.map(g=>({...g, type:'guests'}))].filter(x => x.roomId === room.id);
+                                                    const isFull = occupants.length >= (room.type === 'พักรวม' ? 2 : 1);
+                                                    return (
+                                                        <div key={room.id} className="bg-white p-6 rounded-3xl border shadow-sm relative group hover:border-indigo-200 transition-all">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="text-left flex-1">
+                                                                    <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">{room.type}</p>
+                                                                    <div className="flex items-center flex-wrap gap-2">
+                                                                        <h4 className="text-2xl font-black text-slate-900 tracking-tighter leading-none">ห้อง {room.roomNo}</h4>
+                                                                        {occupants.length > 2 && <span className="text-[9px] text-rose-500 font-bold bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100 tracking-normal whitespace-nowrap">เกินจำนวนที่กำหนด</span>}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex flex-col items-end gap-2">
+                                                                    <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${isFull ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>{isFull ? 'เต็ม' : 'ว่าง'}</span>
+                                                                    <button onClick={() => toggleRoomLock(room.id, false)} title="จัดเก็บห้องนี้ (ล็อค)" className="p-1.5 bg-slate-100 text-slate-400 hover:bg-emerald-100 hover:text-emerald-600 rounded-lg transition-colors">
+                                                                        <Icon name="unlock" size={14} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="bg-slate-50 p-4 rounded-xl space-y-2 min-h-[100px] border-2 border-dashed flex flex-col justify-center">
+                                                                {occupants.map(occ => (
+                                                                    <div key={occ.id} className="flex justify-between items-center text-[11px] font-bold bg-white p-2.5 rounded-lg border shadow-sm animate-in zoom-in">
+                                                                        <div className="truncate">
+                                                                            <div className="text-slate-800">{occ.rank === 'อื่นๆ' ? occ.rankOther : occ.rank} {occ.firstName} ({occ.nickname || "-"})</div>
+                                                                            <div className="text-[8px] text-indigo-500 uppercase mt-0.5">{occ.unitName || occ.category} | โทร: {formatPhone(occ.phone)}</div>
+                                                                        </div>
+                                                                        <button onClick={() => assignRoom(occ.id, '', occ.type)} className="text-rose-500 font-bold uppercase p-1">ออก</button>
+                                                                    </div>
+                                                                ))}
+                                                                {occupants.length === 0 && <p className="text-center text-[10px] text-slate-300 font-bold uppercase italic opacity-30">ห้องว่าง</p>}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {unlockedRooms.length === 0 && accRoomSearchTerm && (
+                                                    <div className="col-span-1 md:col-span-2 text-center p-10 text-slate-300 font-bold text-xs uppercase">ไม่พบข้อมูลห้องพักที่ค้นหา</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="lg:col-span-4 space-y-4 sticky top-24 h-fit">
+                                            <div className="bg-white p-6 rounded-3xl shadow-xl border flex flex-col">
+                                                <h4 className="text-xs font-black uppercase tracking-widest text-slate-800 mb-4 flex items-center gap-2 leading-none"><Icon name="users" size={14} /> รายชื่อรอจัดที่พัก</h4>
+                                                
+                                                <div className="relative mb-4">
+                                                    <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                    <input 
+                                                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-[10px] font-bold transition-all" 
+                                                        placeholder="ค้นหารายชื่อเพื่อจัดห้อง..." 
+                                                        value={accSearchTerm} 
+                                                        onChange={e=>setAccSearchTerm(e.target.value)} 
+                                                    />
+                                                </div>
+
+                                                <div className="space-y-3 max-h-[500px] overflow-y-auto no-scrollbar">
+                                                    {[...seminar.filter(s=>!s.roomId).map(s=>({...s, type:'seminar'})), ...guests.filter(g=>!g.roomId).map(g=>({...g, type:'guests'}))]
+                                                        .filter(p => ((p.rank === 'อื่นๆ' ? (p.rankOther || '') : p.rank) + p.firstName + p.lastName + (p.nickname||'') + (p.unitName||'')).toLowerCase().includes(accSearchTerm.toLowerCase()))
+                                                        .map(p => (
+                                                        <div key={p.id} className="bg-slate-50 p-3 rounded-2xl border flex flex-col gap-2 hover:border-indigo-200 transition-colors">
+                                                            <div className="text-left leading-tight">
+                                                                <div className="text-xs font-bold text-slate-800">{p.rank === 'อื่นๆ' ? p.rankOther : p.rank} {p.firstName} ({p.nickname || "-"})</div>
+                                                                <div className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">{p.unitName || p.category} | โทร: {formatPhone(p.phone)}</div>
+                                                            </div>
+                                                            <select className="text-[10px] font-bold p-2.5 border rounded-xl bg-slate-900 text-white cursor-pointer w-full outline-none focus:ring-2 focus:ring-indigo-500" onChange={(e) => assignRoom(p.id, e.target.value, p.type)} value="">
+                                                                <option value="">เลือกห้องพัก...</option>
+                                                                {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNo} ({r.type}) {r.isLocked ? '[ล็อค]' : ''}</option>)}
+                                                            </select>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )})() : accSubTab === 'staff' ? (
+                                    <div className="space-y-6">
+                                        <div className="flex justify-between items-center text-left">
+                                            <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none">กองอำนวยการ/วิทยากร ({guests.length})</h3>
+                                            <button onClick={()=>{setIsEditMode(false); setGuestForm({rank:'', rankOther:'', firstName:'', lastName:'', nickname:'', position:'', category:'กองอำนวยการ', phone: '', roomId:'', unit: ''}); setIsGuestModalOpen(true)}} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase shadow-lg flex items-center gap-2"><Icon name="plus" size={14} /> เพิ่มรายชื่อ</button>
+                                        </div>
+                                        <div className="bg-white rounded-3xl shadow-xl border overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest"><tr><th className="p-5">ชื่อ-นามสกุล</th><th className="p-5">ตำแหน่ง/หน่วย</th><th className="p-5 text-center">ประเภท</th><th className="p-5 text-center">ห้อง</th><th className="p-5 text-right">จัดการ</th></tr></thead><tbody className="divide-y">{guests.map(g => (<tr key={g.id} className="hover:bg-slate-50 transition-all"><td className="p-5 font-bold"><div className="text-slate-800">{g.rank === 'อื่นๆ' ? g.rankOther : g.rank} {g.firstName} {g.lastName} <span className="text-indigo-500">({g.nickname || '-'})</span></div><div className="font-mono text-xs text-slate-400 mt-1">{adminProfile ? formatPhone(g.phone) : maskPhoneNumber(g.phone)}</div></td><td className="p-5 font-bold text-[11px] text-slate-500 leading-tight"><div>{g.position}</div><div className="text-[9px] uppercase">{g.unit}</div></td><td className="p-5 text-center"><span className="px-2 py-0.5 rounded bg-slate-100 font-bold text-[9px] uppercase">{g.category}</span></td><td className="p-5 text-center font-black text-rose-500">{rooms.find(r => r.id === g.roomId)?.roomNo || '-'}</td><td className="p-5 text-right flex justify-end gap-1"><button onClick={()=>{setIsEditMode(true); setCurrentEditItem(g); setGuestForm(g); setIsGuestModalOpen(true)}} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Icon name="edit-2" size={14} /></button><button onClick={async ()=>{if(confirm("ลบ?")) { await deleteDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'guests'), g.id)); logAction("DELETE_GUEST", g.firstName); }}} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Icon name="trash-2" size={14} /></button></td></tr>))}</tbody></table></div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-white p-8 rounded-[2rem] border shadow-sm">
+                                        <div className="flex justify-between items-center mb-8">
+                                            <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none">รายชื่อห้องพัก ({rooms.length})</h3>
+                                            <button onClick={()=>{setIsEditMode(false); setRoomForm({roomNo: '', type: 'พักรวม', status: 'ว่าง', statusOther: ''}); setIsRoomModalOpen(true); }} className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-2"><Icon name="plus" size={14} /> เพิ่มห้องพัก</button>
+                                        </div>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                                            {rooms.map(room => (
+                                                <div key={room.id} className="bg-slate-50 p-6 rounded-2xl border text-center relative group">
+                                                    <div className="text-xl font-black text-slate-800 flex items-center justify-center gap-1">
+                                                        {room.isLocked && <Icon name="lock" size={14} className="text-emerald-500" />} {room.roomNo}
+                                                    </div>
+                                                    <div className="text-[8px] font-bold text-slate-400 uppercase mt-1">{room.type}</div>
+                                                    <div className={`text-[9px] font-bold uppercase mt-2 px-2 py-0.5 rounded-full inline-block border ${room.status === 'ว่าง' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : room.status === 'VIP' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-200 text-slate-600 border-slate-300'}`}>{room.status === 'อื่นๆ' ? room.statusOther : (room.status || 'ว่าง')}</div>
+                                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button onClick={()=>{setIsEditMode(true); setCurrentEditItem(room); setRoomForm(room); setIsRoomModalOpen(true);}} className="p-1 text-slate-300 hover:text-indigo-500"><Icon name="edit-2" size={12} /></button>
+                                                        <button onClick={async ()=>{if(confirm("ลบห้องพัก?")) await deleteDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'rooms'), room.id))}} className="p-1 text-slate-300 hover:text-rose-500"><Icon name="trash-2" size={12} /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : activeSheet === 'admin_mgmt' ? (
+                            <div className="space-y-6 animate-in fade-in duration-500 text-left">
+                                <div className="flex gap-6 border-b border-slate-200 mb-6 overflow-x-auto no-scrollbar">
+                                    <button onClick={()=>setAdminSubTab('users')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all whitespace-nowrap ${adminSubTab === 'users' ? 'subtab-active' : 'text-slate-400'}`}>จัดการแอดมิน</button>
+                                    <button onClick={()=>setAdminSubTab('logs')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all whitespace-nowrap ${adminSubTab === 'logs' ? 'subtab-active' : 'text-slate-400'}`}>ประวัติกิจกรรม</button>
+                                    <button onClick={()=>setAdminSubTab('export')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all whitespace-nowrap ${adminSubTab === 'export' ? 'subtab-active' : 'text-slate-400'}`}>นำเข้า/ส่งออก ข้อมูล</button>
+                                    <button onClick={()=>setAdminSubTab('restore')} className={`pb-3 text-xs uppercase font-black tracking-widest transition-all whitespace-nowrap ${adminSubTab === 'restore' ? 'subtab-active' : 'text-slate-400'}`}>กู้คืนข้อมูลหลัก</button>
+                                </div>
+                                {adminSubTab === 'export' ? (
+                                    <div className="space-y-6">
+                                        <div className="flex flex-col md:flex-row items-center justify-between bg-emerald-50 border border-emerald-200 p-5 rounded-2xl gap-4">
+                                            <div className="text-left">
+                                                <h4 className="font-black text-emerald-800 uppercase tracking-widest text-sm flex items-center gap-2"><Icon name="table" size={18} /> การเชื่อมต่อ Google Sheet</h4>
+                                                <p className="text-[10px] text-emerald-600 mt-2 leading-relaxed">
+                                                    คุณสามารถ <span className="font-bold">Export เป็นไฟล์ CSV</span> นำไปแก้ไขบน Google Sheet และสามารถ <span className="font-bold">นำเข้ากลับจาก Google Sheet</span> ได้ทันที
+                                                </p>
+                                            </div>
+                                            <a href="https://docs.google.com/spreadsheets/d/1U4dq5m8MbwyYgfgN_zhTWJEDAjIfR3DA6h5H2YEQdGU/edit" target="_blank" rel="noreferrer" className="whitespace-nowrap px-6 py-4 bg-emerald-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-700 shadow-lg flex items-center gap-2 transition-all hover:scale-105">
+                                                <Icon name="external-link" size={14} /> เปิด Google Sheet หลัก
+                                            </a>
+                                        </div>
+
+                                        <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none mb-6">นำเข้าและส่งออกข้อมูล (Import/Export CSV)</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                            
+                                            {/* Seminar Export/Import */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col items-center justify-center gap-4 hover:border-indigo-300 transition-all">
+                                                <div className="bg-indigo-50 p-4 rounded-full text-indigo-600"><Icon name="users" size={24} /></div>
+                                                <div className="text-center"><p className="font-bold text-sm">ผู้ลงทะเบียนสัมมนา</p><p className="text-[10px] text-slate-400 uppercase">{seminar.length} รายการ</p></div>
+                                                <div className="w-full flex flex-col gap-2">
+                                                    <button onClick={() => exportToCSV(seminar, 'seminar')} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-indigo-700 shadow-md">ส่งออก CSV</button>
+                                                    <button onClick={() => importFromGoogleSheet('seminar')} className="w-full py-2.5 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-sky-100 shadow-sm flex justify-center items-center gap-1.5"><Icon name="download-cloud" size={12}/> ดึงจาก Sheet</button>
+                                                    <input type="file" accept=".csv" className="hidden" ref={importSeminarRef} onChange={e => handleImportCSV(e, 'seminar')} />
+                                                    <button onClick={() => importSeminarRef.current.click()} className="w-full py-2.5 bg-white text-slate-500 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 shadow-sm flex justify-center items-center gap-1.5"><Icon name="upload" size={12}/> นำเข้า CSV (Local)</button>
+                                                </div>
+                                            </div>
+
+                                            {/* Units Export/Import */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col items-center justify-center gap-4 hover:border-amber-300 transition-all">
+                                                <div className="bg-amber-50 p-4 rounded-full text-amber-600"><Icon name="shield" size={24} /></div>
+                                                <div className="text-center"><p className="font-bold text-sm">ฐานข้อมูลหน่วย</p><p className="text-[10px] text-slate-400 uppercase">{units.length} รายการ</p></div>
+                                                <div className="w-full flex flex-col gap-2">
+                                                    <button onClick={() => exportToCSV(units, 'units')} className="w-full py-2.5 bg-amber-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-amber-700 shadow-md">ส่งออก CSV</button>
+                                                    <button onClick={() => importFromGoogleSheet('units')} className="w-full py-2.5 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-sky-100 shadow-sm flex justify-center items-center gap-1.5"><Icon name="download-cloud" size={12}/> ดึงจาก Sheet</button>
+                                                    <input type="file" accept=".csv" className="hidden" ref={importUnitRef} onChange={e => handleImportCSV(e, 'units')} />
+                                                    <button onClick={() => importUnitRef.current.click()} className="w-full py-2.5 bg-white text-slate-500 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 shadow-sm flex justify-center items-center gap-1.5"><Icon name="upload" size={12}/> นำเข้า CSV (Local)</button>
+                                                </div>
+                                            </div>
+
+                                            {/* Guests Export/Import */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col items-center justify-center gap-4 hover:border-emerald-300 transition-all">
+                                                <div className="bg-emerald-50 p-4 rounded-full text-emerald-600"><Icon name="star" size={24} /></div>
+                                                <div className="text-center"><p className="font-bold text-sm">กองอำนวยการ</p><p className="text-[10px] text-slate-400 uppercase">{guests.length} รายการ</p></div>
+                                                <div className="w-full flex flex-col gap-2">
+                                                    <button onClick={() => exportToCSV(guests, 'guests')} className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-700 shadow-md">ส่งออก CSV</button>
+                                                    <button onClick={() => importFromGoogleSheet('guests')} className="w-full py-2.5 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-sky-100 shadow-sm flex justify-center items-center gap-1.5"><Icon name="download-cloud" size={12}/> ดึงจาก Sheet</button>
+                                                    <input type="file" accept=".csv" className="hidden" ref={importGuestRef} onChange={e => handleImportCSV(e, 'guests')} />
+                                                    <button onClick={() => importGuestRef.current.click()} className="w-full py-2.5 bg-white text-slate-500 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 shadow-sm flex justify-center items-center gap-1.5"><Icon name="upload" size={12}/> นำเข้า CSV (Local)</button>
+                                                </div>
+                                            </div>
+
+                                            {/* Rooms Export/Import */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col items-center justify-center gap-4 hover:border-rose-300 transition-all">
+                                                <div className="bg-rose-50 p-4 rounded-full text-rose-600"><Icon name="home" size={24} /></div>
+                                                <div className="text-center"><p className="font-bold text-sm">จัดที่พัก</p><p className="text-[10px] text-slate-400 uppercase">{rooms.length} รายการ</p></div>
+                                                <div className="w-full flex flex-col gap-2">
+                                                    <button onClick={() => exportToCSV(rooms, 'rooms')} className="w-full py-2.5 bg-rose-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-rose-700 shadow-md">ส่งออก CSV</button>
+                                                    <button onClick={() => importFromGoogleSheet('rooms')} className="w-full py-2.5 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-sky-100 shadow-sm flex justify-center items-center gap-1.5"><Icon name="download-cloud" size={12}/> ดึงจาก Sheet</button>
+                                                    <input type="file" accept=".csv" className="hidden" ref={importRoomRef} onChange={e => handleImportCSV(e, 'rooms')} />
+                                                    <button onClick={() => importRoomRef.current.click()} className="w-full py-2.5 bg-white text-slate-500 border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-50 shadow-sm flex justify-center items-center gap-1.5"><Icon name="upload" size={12}/> นำเข้า CSV (Local)</button>
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                    </div>
+                                ) : adminSubTab === 'restore' ? (
+                                    <div className="space-y-6">
+                                        <div className="space-y-4">
+                                            <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none mb-6">กู้คืนข้อมูลหลัก (ระบบ)</h3>
+                                            <div className="bg-rose-50 border border-rose-200 p-6 rounded-2xl text-rose-800 text-center md:text-left flex flex-col md:flex-row gap-6 items-center">
+                                                <div className="flex-1">
+                                                    <h4 className="font-bold mb-2 flex items-center justify-center md:justify-start gap-2"><Icon name="alert-triangle" size={16} /> คำเตือน</h4>
+                                                    <p className="text-xs">การกู้คืนฐานข้อมูลหน่วย 297 หน่วย จะทำการเขียนทับและเพิ่มข้อมูลหน่วยมาตรฐานกลับเข้าสู่ระบบ หากมีข้อมูลหน่วยเดิมอยู่แล้ว ระบบจะอัปเดตข้อมูลให้ตรงกับมาตรฐานต้นฉบับ</p>
+                                                </div>
+                                                <button onClick={() => { if(confirm('ยืนยันการกู้คืนข้อมูล 297 หน่วย?')) seedUnits(); }} className="w-full md:w-auto bg-rose-600 text-white px-6 py-4 rounded-xl text-xs font-bold uppercase tracking-widest shadow-xl hover:bg-rose-700 transition-all flex items-center justify-center gap-2 whitespace-nowrap" disabled={isSeedingRef.current}>
+                                                    <Icon name="refresh-cw" size={14} /> {isSeedingRef.current ? 'กำลังดำเนินการ...' : 'กู้คืนฐานข้อมูล 297 หน่วย'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        {hasPermission('SUPER_ADMIN') && (
+                                            <div className="space-y-4 pt-6 border-t border-slate-200">
+                                                <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none mb-6">ข้อมูลตัวอย่าง (Mock Data)</h3>
+                                                <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl text-amber-800 text-center md:text-left flex flex-col md:flex-row gap-6 items-center">
+                                                    <div className="flex-1">
+                                                        <h4 className="font-bold mb-2 flex items-center justify-center md:justify-start gap-2"><Icon name="database" size={16} /> ทดสอบระบบด้วยข้อมูลสมมติ</h4>
+                                                        <p className="text-xs">สร้างข้อมูลผู้สัมมนา ห้องพัก และกองอำนวยการอัตโนมัติ 10-20 รายการ เพื่อใช้ทดสอบการทำงานของระบบ (ข้อมูลทั้งหมดจะมีรหัสขึ้นต้นด้วย MOCK_)</p>
+                                                    </div>
+                                                    <div className="flex flex-col gap-2 w-full md:w-auto">
+                                                        <button onClick={generateMockData} className="w-full bg-amber-600 text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-xl hover:bg-amber-700 transition-all flex items-center justify-center gap-2 whitespace-nowrap">
+                                                            <Icon name="file-plus" size={14} /> สร้างข้อมูลตัวอย่าง
+                                                        </button>
+                                                        <button onClick={deleteMockData} className="w-full bg-white text-rose-600 border border-rose-200 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-sm hover:bg-rose-50 transition-all flex items-center justify-center gap-2 whitespace-nowrap">
+                                                            <Icon name="trash-2" size={14} /> ลบข้อมูลตัวอย่าง
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : adminSubTab === 'users' ? (
+                                    <div className="space-y-6">
+                                        <div className="flex justify-between items-center text-left">
+                                            <h3 className="font-black uppercase tracking-widest text-slate-800 leading-none">จัดการสิทธิ์ผู้ใช้งาน</h3>
+                                            <button onClick={()=>{setIsEditMode(false); setAdminForm({name:'', username:'', password:'', roles:['VIEWER']}); setIsAdminModalOpen(true)}} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"><Icon name="user-plus" size={14} /> เพิ่มแอดมิน</button>
+                                        </div>
+                                        <div className="bg-white rounded-[2rem] shadow-sm border overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest"><tr><th className="p-5">ชื่อ-นามสกุล</th><th className="p-5 text-center">Username</th><th className="p-5 text-center">สิทธิ์การใช้งาน</th><th className="p-5 text-right">จัดการ</th></tr></thead><tbody className="divide-y">{admins.map(a => (<tr key={a.id} className="hover:bg-slate-50 transition-all"><td className="p-5 font-bold text-slate-800">{a.name}</td><td className="p-5 text-center font-mono text-xs text-slate-500">{a.username}</td><td className="p-5 text-center">{(a.roles || []).map(r => <span key={r} className={`role-tag ${ROLES_CONFIG[r]?.color}`}>{ROLES_CONFIG[r]?.label}</span>)}</td><td className="p-5 text-right flex justify-end gap-1"><button onClick={()=>{setIsEditMode(true); setCurrentEditItem(a); setAdminForm(a); setIsAdminModalOpen(true)}} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Icon name="edit-2" size={14} /></button>{a.username !== 'admin' && <button onClick={async ()=>{if(confirm("ลบแอดมิน?")) await deleteDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'admins'), a.id))}} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Icon name="trash-2" size={14} /></button>}</td></tr>))}</tbody></table></div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-widest text-slate-800 leading-none">ประวัติกิจกรรมล่าสุด</h3><div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ทั้งหมด {logs.length} รายการ</div></div>
+                                        <div className="bg-white rounded-3xl shadow-sm border overflow-hidden max-h-[60vh] overflow-y-auto no-scrollbar text-left text-xs"><table className="w-full text-left"><thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase sticky top-0"><tr><th className="p-5">เวลา</th><th className="p-5">ผู้ใช้งาน</th><th className="p-5">กิจกรรม</th><th className="p-5">รายละเอียด</th></tr></thead><tbody className="divide-y">{logs.sort((a,b)=> (b.timestamp?.seconds||0)-(a.timestamp?.seconds||0)).map(l => (<tr key={l.id} className="hover:bg-slate-50"><td className="p-5 text-slate-400 font-mono whitespace-nowrap">{l.timestamp instanceof Date ? l.timestamp.toLocaleString('th-TH') : l.timestamp?.toDate?.()?.toLocaleString('th-TH') || '...'}</td><td className="p-5 font-bold text-indigo-600 whitespace-nowrap">{l.userName}</td><td className="p-5 font-bold uppercase leading-tight whitespace-nowrap">{l.action}</td><td className="p-5 text-slate-500">{l.details}</td></tr>))}</tbody></table></div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-6 animate-in slide-in-from-bottom-5">
+                                <div className="flex flex-col md:flex-row gap-4 items-center">
+                                    <div className="relative flex-1 w-full text-left"><Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input className="w-full pl-11 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:border-indigo-500 font-bold text-sm" placeholder="ค้นหารายชื่อผู้ลงทะเบียน..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} /></div>
+                                    <button onClick={()=>{setIsEditMode(false); setSeminarForm(INITIAL_SEMINAR_FORM); setIsSeminarModalOpen(true)}} className="w-full md:w-auto bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-2 tracking-widest leading-none"><Icon name="user-plus" size={16} /> ลงทะเบียนสัมมนา</button>
+                                </div>
+                                <div className="bg-white rounded-[2rem] shadow-xl border overflow-hidden overflow-x-auto">
+                                    <table className="w-full text-left text-sm min-w-[800px]"><thead className="bg-slate-50 border-b uppercase text-[10px] font-black text-slate-400 tracking-wider"><tr><th className="p-5">ผู้สัมมนา</th><th className="p-5 text-center">เบอร์โทร</th>{adminProfile && <th className="p-5 text-center">ที่พัก</th>}{adminProfile && <th className="p-5 text-center">เบิกจ่าย</th>}{adminProfile && <th className="p-5 text-right">จัดการ</th>}</tr></thead><tbody className="divide-y">
+                                    {filteredSeminar.map(s => (
+                                        <tr key={s.id} className="hover:bg-slate-50 transition-all">
+                                            <td className="p-5 text-left"><div className="flex flex-col leading-tight"><div className="font-extrabold text-slate-800 uppercase tracking-tighter">{s.rank} {s.firstName} {s.lastName} <span className="text-indigo-500 font-bold">({s.nickname || "-"})</span></div><div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{s.region} - {s.unitName}</div></div></td>
+                                            <td className="p-5 font-mono text-xs text-center text-slate-600">{adminProfile ? formatPhone(s.phone) : maskPhoneNumber(s.phone)}</td>
+                                            {adminProfile && <td className="p-5 text-center font-black text-rose-500 leading-none"><div>{rooms.find(r => r.id === s.roomId)?.roomNo || '-'}</div><div className="text-[8px] uppercase text-slate-300 font-bold mt-1">{s.roomTypePref}</div></td>}
+                                            {adminProfile && <td className="p-5 text-center"><span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${s.disbursement === 'เบิกได้' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{s.disbursement}</span></td>}
+                                            {adminProfile && <td className="p-5 text-right flex justify-end gap-1"><button onClick={()=>{setIsEditMode(true); setCurrentEditItem(s); setSeminarForm(s); setIsSeminarModalOpen(true)}} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Icon name="edit-2" size={14} /></button><button onClick={async ()=>{if(confirm("ลบข้อมูล?")) { await deleteDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'seminar'), s.id)); logAction("DELETE_SEMINAR", s.firstName); }}} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><Icon name="trash-2" size={14} /></button></td>}
+                                        </tr>
+                                    ))}
+                                    {filteredSeminar.length === 0 && <tr><td colSpan={adminProfile ? "5" : "2"} className="p-20 text-center text-slate-200 font-bold uppercase tracking-widest opacity-30 italic">ไม่พบข้อมูลในระบบ</td></tr>}
+                                </tbody></table></div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* MODALS */}
+                    
+                    {/* Easter Egg / Changelog Modal */}
+                    <Modal title="ประวัติการอัปเดตระบบ (Changelog)" isOpen={isChangelogOpen} onClose={()=>setIsChangelogOpen(false)}>
+                        <div className="space-y-4 text-left text-sm text-slate-700">
+                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                <h4 className="font-black text-indigo-700 uppercase tracking-widest mb-2">v12.1.4a STABLE</h4>
+                                <ul className="list-disc pl-5 space-y-1 text-xs">
+                                    <li>ปรับปรุงระบบนำเข้า/ส่งออกข้อมูลใหม่ รองรับ 4 ชุดข้อมูล (ผู้ลงทะเบียนสัมมนา, ฐานข้อมูลหน่วย, กองอำนวยการ, จัดที่พัก)</li>
+                                    <li>สามารถดึงข้อมูลจาก Google Sheet และไฟล์ CSV ในทุกหมวดข้อมูลได้อย่างสมบูรณ์</li>
+                                </ul>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <h4 className="font-black text-slate-500 uppercase tracking-widest mb-2">v12.1.4 STABLE</h4>
+                                <ul className="list-disc pl-5 space-y-1 text-xs text-slate-500">
+                                    <li>ปรับการแสดงผล วันที่และเวลา ให้ตรึงไว้ด้านบน ไม่ถูกเลื่อนหายไปตามข้อมูล</li>
+                                    <li>เพิ่มระบบดึงข้อมูลจาก Google Sheet โดยตรง ช่วยให้จัดการข้อมูลจากภายนอกได้ง่ายขึ้น</li>
+                                    <li>เพิ่มปุ่มลิงก์เชื่อมต่อไปยังระบบ Google Sheets ให้จัดการข้อมูลได้ทันที</li>
+                                    <li>เพิ่มยศ พ.อ. (พิเศษ) และ จ.ส.อ. (พิเศษ) ในรายการตัวเลือกยศ</li>
+                                    <li>เพิ่มตัวเลือกยศ "อื่นๆ" พร้อมช่องระบุ สำหรับชุดข้อมูลกองอำนวยการ</li>
+                                    <li>ปรับปรุงส่วนนำเข้า/ส่งออก ให้แสดง "ชุดข้อมูล กองอำนวยการ" ชัดเจนขึ้น</li>
+                                </ul>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <h4 className="font-black text-slate-500 uppercase tracking-widest mb-2">v12.1.3H STABLE</h4>
+                                <ul className="list-disc pl-5 space-y-1 text-xs text-slate-500">
+                                    <li>เพิ่มระบบ Import ข้อมูลจากไฟล์ CSV (นำเข้าทับข้อมูลเดิม/เพิ่มข้อมูลใหม่)</li>
+                                    <li>ปรับปรุงระบบ Export ให้ส่งออก ID เพื่อใช้ประกอบการ Import ได้สมบูรณ์</li>
+                                </ul>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <h4 className="font-black text-slate-500 uppercase tracking-widest mb-2">v12.1.3G STABLE</h4>
+                                <ul className="list-disc pl-5 space-y-1 text-xs text-slate-500">
+                                    <li>เพิ่มระบบจัดเก็บ Timestamp รูปแบบ Google Sheet</li>
+                                    <li>แสดงเวลาสร้างและเวลาแก้ไขล่าสุด ในฟอร์มแก้ไขผู้เข้าสัมมนา และ กองอำนวยการ</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    <Modal title={isEditMode ? "แก้ไขข้อมูลสัมมนา" : "ลงทะเบียนผู้เข้าร่วมสัมมนา"} isOpen={isSeminarModalOpen} onClose={()=>setIsSeminarModalOpen(false)}>
+                        <form onSubmit={saveSeminar} className="space-y-4 text-left">
+                            
+                            {/* Timestamp Display for Admin in Edit Mode */}
+                            {(adminProfile && isEditMode && (seminarForm.createdAt || seminarForm.updatedAt)) && (
+                                <div className="bg-indigo-50/50 p-3 rounded-xl mb-4 text-[10px] font-mono text-slate-500 border border-indigo-100 flex flex-col md:flex-row justify-between gap-2">
+                                    <div><span className="font-bold text-slate-700">ลงทะเบียน:</span> {seminarForm.createdAt || '-'}</div>
+                                    <div><span className="font-bold text-slate-700">แก้ไขล่าสุด:</span> {seminarForm.updatedAt || '-'}</div>
+                                </div>
+                            )}
+
+                            <div className="section-box">
+                                <h4 className="section-title">1. หมวดข้อมูลหน่วย</h4>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Field label="กองทัพภาค"><select required={!adminProfile} className="input-field" value={seminarForm.region} onChange={e=>setSeminarForm({...seminarForm, region: e.target.value, unitName: ''})}><option value="">เลือก</option>{REGIONS_LIST.map(r=><option key={r} value={r}>{r}</option>)}</select></Field>
+                                    <Field label="หน่วย"><select required={!adminProfile} className="input-field" value={seminarForm.unitName} onChange={e=>setSeminarForm({...seminarForm, unitName: e.target.value})}><option value="">เลือกหน่วย</option>{units.filter(u=>u.region===seminarForm.region).map(u=><option key={u.id} value={`${u.id} : ${u.name}`}>{u.id} : {u.name}</option>)}</select></Field>
+                                </div>
+                            </div>
+                            <div className="section-box">
+                                <h4 className="section-title">2. หมวดข้อมูลผู้ลงทะเบียน</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                    <Field label="ยศ"><select required={!adminProfile} className="input-field" value={seminarForm.rank} onChange={e=>setSeminarForm({...seminarForm, rank:e.target.value})}><option value="">ยศ</option>{RANKS.map(r=><option key={r} value={r}>{r}</option>)}</select></Field>
+                                    <Field label="ชื่อ"><input required={!adminProfile} className="input-field" value={seminarForm.firstName} onChange={e=>setSeminarForm({...seminarForm, firstName: e.target.value})} /></Field>
+                                    <Field label="นามสกุล"><input required={!adminProfile} className="input-field" value={seminarForm.lastName} onChange={e=>setSeminarForm({...seminarForm, lastName: e.target.value})} /></Field>
+                                    <Field label="ชื่อเล่น"><input className="input-field" value={seminarForm.nickname} onChange={e=>setSeminarForm({...seminarForm, nickname: e.target.value})} /></Field>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                                    <Field label="เบอร์มือถือ"><input required={!adminProfile} className="input-field font-mono" value={seminarForm.phone} onChange={e=>setSeminarForm({...seminarForm, phone: e.target.value})} /></Field>
+                                    <Field label="Line ID"><input className="input-field font-mono" value={seminarForm.lineId} onChange={e=>setSeminarForm({...seminarForm, lineId: e.target.value})} /></Field>
+                                    <Field label="ตำแหน่ง"><input required={!adminProfile} className="input-field" value={seminarForm.position} onChange={e=>setSeminarForm({...seminarForm, position: e.target.value})} /></Field>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                    <Field label="กำเนิด"><select required={!adminProfile} className="input-field" value={seminarForm.origin} onChange={e=>setSeminarForm({...seminarForm, origin: e.target.value})}><option value="">เลือก</option>{ORIGINS.map(o=><option key={o} value={o}>{o}</option>)}</select></Field>
+                                    {seminarForm.origin === 'อื่นๆ' && <Field label="ระบุ"><input required={!adminProfile} className="input-field" value={seminarForm.originOther} onChange={e=>setSeminarForm({...seminarForm, originOther: e.target.value})} /></Field>}
+                                    <Field label="รุ่น"><input className="input-field" value={seminarForm.batch} onChange={e=>setSeminarForm({...seminarForm, batch: e.target.value})} /></Field>
+                                    <Field label="ปี พ.ศ."><input className="input-field" value={seminarForm.year} onChange={e=>setSeminarForm({...seminarForm, year: e.target.value})} /></Field>
+                                </div>
+                                {seminarForm.origin !== 'นตท.' && seminarForm.origin !== '' && (
+                                    <div className="grid grid-cols-2 gap-3 mb-4 p-3 bg-indigo-50 rounded-xl">
+                                        <Field label="นป. รุ่น"><input className="input-field" value={seminarForm.npBatch} onChange={e=>setSeminarForm({...seminarForm, npBatch: e.target.value})} /></Field>
+                                        <Field label="นป. ปี พ.ศ."><input className="input-field" value={seminarForm.npYear} onChange={e=>setSeminarForm({...seminarForm, npYear: e.target.value})} /></Field>
+                                    </div>
+                                )}
+                                <Field label="ประสบการณ์ฝึกทหารใหม่"><select className="input-field" value={seminarForm.trainingExp} onChange={e=>setSeminarForm({...seminarForm, trainingExp: e.target.value})}>{TRAINING_EXP.map(t=><option key={t} value={t}>{t}</option>)}</select></Field>
+                            </div>
+                            <div className="section-box">
+                                <h4 className="section-title">3. หมวดข้อมูลการเข้าพัก</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                    <Field label="การเดินทาง"><select className="input-field" value={seminarForm.travelBy} onChange={e=>setSeminarForm({...seminarForm, travelBy: e.target.value})}>{TRAVEL_METHODS.map(t=><option key={t} value={t}>{t}</option>)}</select></Field>
+                                    <Field label="ความต้องการที่พัก"><select className="input-field" value={seminarForm.roomTypePref} onChange={e=>setSeminarForm({...seminarForm, roomTypePref: e.target.value})}>{ROOM_TYPES.map(r=><option key={r} value={r}>{r}</option>)}</select></Field>
+                                </div>
+                                <Field label="ข้อจำกัดด้านอาหาร"><select className="input-field" value={seminarForm.dietary} onChange={e=>setSeminarForm({...seminarForm, dietary: e.target.value})}>{DIETARY_RESTRICTIONS.map(d=><option key={d} value={d}>{d}</option>)}</select></Field>
+                            </div>
+                            <div className="section-box">
+                                <h4 className="section-title">4. หมายเหตุ</h4>
+                                <textarea className="input-field min-h-[80px]" value={seminarForm.remarks} onChange={e=>setSeminarForm({...seminarForm, remarks: e.target.value})} placeholder="ระบุข้อมูลเพิ่มเติม (ถ้ามี)"></textarea>
+                            </div>
+                            
+                            {/* หมวดผู้ดูแล: แสดงเฉพาะแอดมิน หรือ โหมดแก้ไขที่เคยบันทึกไว้แล้ว */}
+                            {(adminProfile || isEditMode) && (
+                                <div className="section-box bg-rose-50 border-rose-200">
+                                    <h4 className="section-title !text-rose-600 !border-rose-600">5. หมวดผู้ดูแล (สำหรับแอดมิน)</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                        <Field label="หมายเลขห้อง (จัดที่พัก)">
+                                            <select className="input-field border-rose-200 focus:border-rose-500" value={seminarForm.roomId || ''} onChange={e=>setSeminarForm({...seminarForm, roomId: e.target.value})}>
+                                                <option value="">-- ยังไม่จัดห้อง --</option>
+                                                {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNo} ({r.type})</option>)}
+                                            </select>
+                                        </Field>
+                                        <Field label="สิทธิ์การเบิกจ่าย"><select className="input-field border-rose-200 focus:border-rose-500" value={seminarForm.disbursement} onChange={e=>setSeminarForm({...seminarForm, disbursement: e.target.value})}><option value="เบิกไม่ได้">เบิกไม่ได้</option><option value="เบิกได้">เบิกได้</option></select></Field>
+                                    </div>
+                                    {seminarForm.roomTypePref === 'พักเดี่ยว' && (
+                                        <Field label="ชำระค่าห้อง (พักเดี่ยว)"><select className="input-field border-rose-200 focus:border-rose-500 bg-white" value={seminarForm.paymentStatus || 'ยังไม่จ่าย'} onChange={e=>setSeminarForm({...seminarForm, paymentStatus: e.target.value})}><option value="ยังไม่จ่าย">ยังไม่จ่าย</option><option value="จ่ายแล้ว">จ่ายแล้ว</option></select></Field>
+                                    )}
+                                </div>
+                            )}
+
+                            <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold uppercase shadow-xl hover:scale-[1.02] transition-all">บันทึกข้อมูลการลงทะเบียน</button>
+                        </form>
+                    </Modal>
+
+                    <Modal title={isEditMode ? "แก้ไขกองอำนวยการ" : "เพิ่มรายชื่อกองอำนวยการ"} isOpen={isGuestModalOpen} onClose={()=>setIsGuestModalOpen(false)}>
+                        <form onSubmit={saveGuest} className="space-y-6 text-left">
+                            
+                            {/* Timestamp Display for Admin in Edit Mode (Guest) */}
+                            {(adminProfile && isEditMode && (guestForm.createdAt || guestForm.updatedAt)) && (
+                                <div className="bg-indigo-50/50 p-3 rounded-xl mb-4 text-[10px] font-mono text-slate-500 border border-indigo-100 flex flex-col md:flex-row justify-between gap-2">
+                                    <div><span className="font-bold text-slate-700">ลงทะเบียน:</span> {guestForm.createdAt || '-'}</div>
+                                    <div><span className="font-bold text-slate-700">แก้ไขล่าสุด:</span> {guestForm.updatedAt || '-'}</div>
+                                </div>
+                            )}
+
+                            <Field label="ประเภท"><select className="input-field font-bold" value={guestForm.category} onChange={e=>setGuestForm({...guestForm, category: e.target.value})}>{CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></Field>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-left">
+                                <Field label="ยศ"><select required className="input-field" value={guestForm.rank} onChange={e=>setGuestForm({...guestForm, rank:e.target.value})}><option value="">ยศ</option>{GUEST_RANKS.map(r=><option key={r} value={r}>{r}</option>)}</select></Field>
+                                {guestForm.rank === 'อื่นๆ' && <Field label="ระบุยศ"><input required className="input-field" value={guestForm.rankOther || ''} onChange={e=>setGuestForm({...guestForm, rankOther: e.target.value})} placeholder="ระบุ..." /></Field>}
+                                <Field label="ชื่อ"><input required className="input-field" value={guestForm.firstName} onChange={e=>setGuestForm({...guestForm, firstName: e.target.value})} /></Field>
+                                <Field label="นามสกุล"><input required className="input-field" value={guestForm.lastName} onChange={e=>setGuestForm({...guestForm, lastName: e.target.value})} /></Field>
+                                <Field label="ชื่อเล่น"><input className="input-field" value={guestForm.nickname} onChange={e=>setGuestForm({...guestForm, nickname: e.target.value})} /></Field>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-left">
+                                <Field label="หน่วยงาน/ตำแหน่ง"><input required className="input-field" value={guestForm.unit} onChange={e=>setGuestForm({...guestForm, unit: e.target.value})} /></Field>
+                                <Field label="เบอร์โทรศัพท์"><input className="input-field font-mono" value={guestForm.phone || ''} onChange={e=>setGuestForm({...guestForm, phone: e.target.value})} placeholder="08X-XXX-XXXX" /></Field>
+                            </div>
+                            <button className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold uppercase text-[10px] tracking-widest shadow-xl leading-none">บันทึกข้อมูลกองอำนวยการ</button>
+                        </form>
+                    </Modal>
+
+                    <Modal title={isEditMode ? "แก้ไขห้องพัก" : "เพิ่มห้องพักใหม่"} isOpen={isRoomModalOpen} onClose={()=>setIsRoomModalOpen(false)}>
+                        <form onSubmit={saveRoom} className="space-y-6 text-left">
+                            <div className="grid grid-cols-2 gap-4">
+                                <Field label="เลขห้อง"><input required className="input-field font-bold text-lg" value={roomForm.roomNo} onChange={e=>setRoomForm({...roomForm, roomNo:e.target.value})} placeholder="เช่น A101"/></Field>
+                                <Field label="ประเภท"><select required className="input-field" value={roomForm.type} onChange={e=>setRoomForm({...roomForm, type:e.target.value})}><option value="พักรวม">พักรวม</option><option value="พักเดี่ยว">พักเดี่ยว</option></select></Field>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <Field label="สถานะห้อง"><select className="input-field" value={roomForm.status || 'ว่าง'} onChange={e=>setRoomForm({...roomForm, status:e.target.value})}>{ROOM_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}</select></Field>
+                                {roomForm.status === 'อื่นๆ' && <Field label="ระบุสถานะอื่นๆ"><input required className="input-field" value={roomForm.statusOther || ''} onChange={e=>setRoomForm({...roomForm, statusOther:e.target.value})} placeholder="โปรดระบุ"/></Field>}
+                            </div>
+                            <button className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-lg leading-none hover:bg-indigo-700">บันทึกห้องพัก</button>
+                        </form>
+                    </Modal>
+
+                    <Modal title={isEditMode ? "แก้ไขแอดมิน" : "เพิ่มแอดมินใหม่"} isOpen={isAdminModalOpen} onClose={()=>setIsAdminModalOpen(false)}>
+                        <form onSubmit={saveAdmin} className="space-y-6 text-left">
+                            <Field label="ชื่อ-นามสกุล"><input required className="input-field font-bold" value={adminForm.name} onChange={e=>setAdminForm({...adminForm, name: e.target.value})} /></Field>
+                            <div className="grid grid-cols-2 gap-4"><Field label="Username"><input required className="input-field font-mono" value={adminForm.username} onChange={e=>setAdminForm({...adminForm, username: e.target.value})} /></Field><Field label="Password"><input required type="text" className="input-field font-mono" value={adminForm.password} onChange={e=>setAdminForm({...adminForm, password: e.target.value})} /></Field></div>
+                            <div className="section-box"><h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">สิทธิ์การเข้าถึง</h4><div className="grid grid-cols-2 gap-3">{Object.keys(ROLES_CONFIG).map(k => (<label key={k} className="flex items-center gap-3 p-3 bg-white rounded-xl border cursor-pointer hover:bg-indigo-50 transition-colors"><input type="checkbox" className="w-4 h-4 text-indigo-600 rounded" checked={adminForm.roles?.includes(k)} onChange={(e) => { let nr = [...(adminForm.roles || [])]; if (e.target.checked) nr.push(k); else nr = nr.filter(r => r !== k); setAdminForm({...adminForm, roles: nr}); }} /><span className="text-[11px] font-bold text-slate-700">{ROLES_CONFIG[k].label}</span></label>))}</div></div>
+                            <button className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-lg leading-none">บันทึกข้อมูลแอดมิน</button>
+                        </form>
+                    </Modal>
+
+                    <Modal title={isEditMode ? "แก้ไขหน่วยงาน" : "เพิ่มหน่วยงานใหม่"} isOpen={isUnitModalOpen} onClose={()=>setIsUnitModalOpen(false)}>
+                        <form onSubmit={saveUnit} className="space-y-6 text-left">
+                            <div className="grid grid-cols-2 gap-4">
+                                <Field label="รหัสหน่วย (3 หลัก)"><input required className="input-field font-mono" value={unitForm.id} onChange={e=>setUnitForm({...unitForm, id:e.target.value})} placeholder="001" disabled={isEditMode}/></Field>
+                                <Field label="กองทัพภาค"><select required className="input-field" value={unitForm.region} onChange={e=>setUnitForm({...unitForm, region:e.target.value})}><option value="">เลือกภาค</option>{REGIONS_LIST.map(r=><option key={r} value={r}>{r}</option>)}</select></Field>
+                            </div>
+                            <Field label="ชื่อหน่วยงาน"><input required className="input-field" value={unitForm.name} onChange={e=>setUnitForm({...unitForm, name:e.target.value})} placeholder="ระบุชื่อหน่วย"/></Field>
+                            <button className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-lg leading-none">บันทึกฐานข้อมูลหน่วย</button>
+                        </form>
+                    </Modal>
+
+                    {statusMsg && <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-2xl font-bold text-[10px] uppercase border border-white/10 animate-in fade-in slide-in-from-bottom-5 text-center leading-relaxed max-w-[90vw]">{statusMsg}</div>}
+                    <footer className="p-8 text-center text-[10px] text-slate-300 font-bold uppercase tracking-[0.4em] opacity-40">Stable Build 12.1.4a | Military Portal Integration</footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
