@@ -1304,7 +1304,7 @@ qdata.forEach(({id,url})=>{
                     <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-white/5 overflow-x-auto no-scrollbar max-w-full">
                         <button onClick={() => handleNav('seminar')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'seminar' ? 'tab-active' : 'text-slate-400'}`}>สัมมนา</button>
                         {adminProfile && <button onClick={() => handleNav('accommodation')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'accommodation' ? 'tab-active' : 'text-slate-400'}`}>จัดการที่พัก</button>}
-                        <button onClick={() => handleNav('units')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'units' ? 'tab-active' : 'text-slate-400'}`}>ฐานข้อมูลหน่วย</button>
+                        <button onClick={() => handleNav('units')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'units' ? 'tab-active' : 'text-slate-400'}`}>ข้อมูลหน่วย</button>
                         {hasPermission('SUPER_ADMIN') && <button onClick={() => handleNav('admin_mgmt')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'admin_mgmt' ? 'tab-active' : 'text-slate-400'}`}>จัดการระบบ</button>}
                         {adminProfile && <button onClick={() => handleNav('dashboard')} className={`px-5 py-2 rounded-lg text-[10px] font-bold uppercase transition-all ${activeSheet === 'dashboard' ? 'tab-active' : 'text-slate-400'}`}>Dashboard</button>}
                         <div className="w-[1px] h-4 bg-slate-700 mx-2 shrink-0"></div>
