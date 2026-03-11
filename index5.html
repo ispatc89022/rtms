@@ -1255,7 +1255,7 @@ qdata.forEach(({id,url})=>{
         logAction("ASSIGN_ROOM", `ID: ${personId} → Room: ${roomId || 'NONE'}`);
     };
 
-    const filteredSeminar = seminar.filter(i => ((i.firstName||'') + (i.lastName||'') + (i.unitName||'')).toLowerCase().includes(searchTerm.toLowerCase()));
+    const filteredSeminar = seminar.filter(i => ((i.firstName||'') + (i.lastName||'') + (i.unitName||'') + (i.region || '')).toLowerCase().includes(searchTerm.toLowerCase()));
     const filteredUnits = units.filter(u => (unitRegionFilter === 'All' || u.region === unitRegionFilter) && ((u.id||"") + (u.name||"")).toLowerCase().includes(unitSearchTerm.toLowerCase()));
 
     // ── HELPERS FOR DISPLAY SETTINGS ──
