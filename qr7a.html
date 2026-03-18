@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RTMS Check-in Station v1.5.0</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #0f172a; color: #f8fafc; overflow: hidden; height: 100vh; }
+        #reader { width: 100% !important; border: none !important; background: #000; height: 100% !important; }
+        #reader video { object-fit: cover !important; height: 100% !important; width: 100% !important; }
+        
+        .scan-line { animation: scan 2s linear infinite; height: 2px; background: #10b981; box-shadow: 0 0 15px #10b981; z-index: 20; position: absolute; left: 0; right: 0; top: 50%; pointer-events: none; }
+        @keyframes scan { 0% { transform: translateY(-20vh); } 100% { transform: translateY(20vh); } }
+
+        .result-overlay { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); transform: translateY(100%); }
+        .result-overlay.active { transform: translateY(0); }
+        
+        .tab-content { display: none; height: 100%; }
+        .tab-content.active { display: flex; flex-direction: column; }
+        
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        
+        .dashboard-grid { display: grid; grid-template-columns: 1fr; gap: 0.5rem; }
+    </style>
+</head>
+<body class="flex flex-col lg:flex-row h-screen overflow-hidden">
+
+    <div id="camera-section" class="relative w-full lg:w-2/3 h-[50vh] lg:h-screen bg-black overflow-hidden border-r border-white/5">
+        <div id="reader"></div>
+        <div class="scan-line"></div>
+        
+        <div class="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-30 bg-gradient-to-b from-black/80 to-transparent">
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-600 p-2 rounded-xl shadow-xl">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-black tracking-tighter uppercase leading-none">RTMS <span class="text-blue-400">Station</span></h1>
+                    <p class="text-[10px] font-bold text-slate-400 tracking-[0.2em] mt-1">V1.5.0 POWER SAVING</p>
+                </div>
+            </div>
+            <button onclick="exportCheckInCSV()" class="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg border border-white/10">Export CSV</button>
+        </div>
+
+        <button onclick="switchCameraMode()" class="absolute bottom-10 right-6 z-30 bg-indigo-600 text-white p-4 rounded-2xl shadow-2xl active:scale-90 transition-all lg:hidden">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        </button>
+    </div>
+
+    <div id="ui-section" class="flex-1 lg:w-1/3 bg-slate-900 lg:h-screen flex flex-col shadow-[-10px_0_40px_rgba(0,0,0,0.3)] z-40">
+        <div class="flex p-4 gap-2 bg-slate-950/50">
+            <button onclick="switchTab('logs')" id="tab-logs-btn" class="flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all bg-indigo-600 text-white">Scanner</button>
+            <button onclick="switchTab('dashboard')" id="tab-dashboard-btn" class="flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all text-slate-400">Live Dashboard</button>
+            <button onclick="switchTab('settings')" id="tab-settings-btn" class="flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all text-slate-400">Settings</button>
+        </div>
+
+        <div class="flex-1 overflow-hidden p-6">
+            <div id="tab-logs" class="tab-content active overflow-y-auto">
+                <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">10 รายการล่าสุด</h3>
+                <div id="log-list" class="space-y-3 pb-20"></div>
+            </div>
+
+            <div id="tab-dashboard" class="tab-content overflow-y-auto">
+                <div class="bg-indigo-600/10 border border-indigo-500/20 rounded-2xl p-4 mb-6 flex justify-between items-center">
+                    <div>
+                        <p class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">ยอดเช็คอินรวม</p>
+                        <h2 id="total-count" class="text-3xl font-black">0</h2>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-block w-3 h-3 bg-emerald-500 rounded-full animate-pulse mr-1"></span>
+                        <span class="text-[10px] font-bold text-emerald-400 uppercase">Live</span>
+                    </div>
+                </div>
+                <div id="full-log-list" class="space-y-2 pb-20">
+                    </div>
+            </div>
+
+            <div id="tab-settings" class="tab-content">
+                <div class="bg-slate-800/50 p-5 rounded-3xl border border-white/5">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase mb-3 block tracking-widest text-center">Camera Configuration</label>
+                    <select id="camera-select" onchange="startScanner()" class="w-full bg-slate-950 text-white text-xs px-4 py-4 rounded-xl border border-white/10 outline-none mb-4 appearance-none"></select>
+                    <button onclick="requestPermission()" class="w-full bg-indigo-600/20 text-indigo-400 py-3 rounded-xl text-[10px] font-black uppercase border border-indigo-500/30">Refresh Hardware</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="result-overlay" class="result-overlay fixed bottom-0 left-0 w-full lg:w-2/3 z-[100] p-6">
+        <div class="bg-white rounded-[2.5rem] p-8 shadow-[0_-20px_60px_rgba(0,0,0,0.4)] text-slate-900 flex flex-col items-center max-w-lg mx-auto">
+            <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+            <h4 class="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] mb-2">เช็คอินสำเร็จ</h4>
+            <h2 id="res-name" class="text-2xl font-black mb-1 text-center leading-tight">---</h2>
+            <p id="res-type" class="text-indigo-600 font-bold text-xs uppercase tracking-widest mb-6">---</p>
+            <div class="w-full bg-slate-50 rounded-2xl p-4 border border-slate-100 text-center">
+                <p class="text-[9px] font-black text-slate-400 uppercase mb-1">หน่วยงาน</p>
+                <p id="res-unit" class="text-xs font-bold text-slate-700 uppercase leading-relaxed">---</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyClnFib72Jwn2umtlG0fD4jBaE-aG1ceWk",
+            authDomain: "rtcdb-66284.firebaseapp.com",
+            projectId: "rtcdb-66284",
+            appId: "1:800467259752:web:961e90546df3390e2b06dd"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const appId = "military-system-v12";
+
+        let html5Qr;
+        let isProcessing = false;
+        let currentFacingMode = "environment";
+
+        // --- ระบบกล้อง ---
+        async function requestPermission() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(track => track.stop());
+                await getCameras();
+                startScanner();
+            } catch (err) { alert("กรุณาอนุญาตเข้าถึงกล้อง"); }
+        }
+
+        async function getCameras() {
+            const devices = await Html5Qrcode.getCameras();
+            const select = document.getElementById('camera-select');
+            if (devices && devices.length > 0) {
+                select.innerHTML = devices.map((d, i) => `<option value="${d.id}">${d.label || 'กล้อง '+i}</option>`).join('');
+            }
+        }
+
+        function switchCameraMode() {
+            currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+            startScanner();
+        }
+
+        function stopScanner() {
+            if (html5Qr && html5Qr.isScanning) {
+                html5Qr.stop().catch(e => console.log(e));
+            }
+        }
+
+        function startScanner() {
+            const cameraId = document.getElementById('camera-select').value;
+            if (html5Qr) {
+                html5Qr.stop().then(() => doStart(cameraId)).catch(() => doStart(cameraId));
+            } else {
+                doStart(cameraId);
+            }
+        }
+
+        function doStart(cameraId) {
+            html5Qr = new Html5Qrcode("reader");
+            const config = { fps: 25, qrbox: (w,h) => ({ width: Math.min(w,h)*0.8, height: Math.min(w,h)*0.8 }), aspectRatio: 1.0 };
+            html5Qr.start({ facingMode: currentFacingMode }, config, onScanSuccess)
+                .catch(() => html5Qr.start(cameraId, config, onScanSuccess));
+        }
+
+        // --- ระบบประมวลผล ---
+        async function onScanSuccess(decodedText) {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            try {
+                let pid = decodedText.includes('?p=') ? decodedText.split('?p=')[1].split('&')[0].trim() : decodedText.trim();
+                let pData = null, typeLabel = '';
+
+                const semDoc = await db.collection(`artifacts/${appId}/public/data/seminar`).doc(pid).get();
+                if (semDoc.exists) { pData = semDoc.data(); typeLabel = 'ผู้เข้าร่วมสัมมนา'; }
+                else {
+                    const guestDoc = await db.collection(`artifacts/${appId}/public/data/guests`).doc(pid).get();
+                    if (guestDoc.exists) { pData = guestDoc.data(); typeLabel = pData.category || 'กองอำนวยการ'; }
+                }
+
+                if (pData) {
+                    const rank = (pData.rank === 'อื่นๆ') ? (pData.rankOther || 'ไม่ระบุ') : (pData.rank || '');
+                    const fullName = `${rank} ${pData.firstName} ${pData.lastName}`;
+                    const unitInfo = `${pData.unit || '-'} : ${pData.unitName || 'ไม่ระบุหน่วย'}`;
+                    const now = new Date();
+
+                    document.getElementById('res-name').innerText = fullName;
+                    document.getElementById('res-type').innerText = typeLabel;
+                    document.getElementById('res-unit').innerText = unitInfo;
+                    document.getElementById('result-overlay').classList.add('active');
+
+                    await db.collection(`artifacts/${appId}/public/data/checkins`).add({
+                        personId: pid, name: fullName, unit: unitInfo, type: typeLabel,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        checkInDate: now.toLocaleString('th-TH')
+                    });
+
+                    new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play();
+                    loadRecentLogs();
+
+                    setTimeout(() => {
+                        document.getElementById('result-overlay').classList.remove('active');
+                        isProcessing = false;
+                    }, 3000);
+                } else {
+                    new Audio('https://assets.mixkit.co/active_storage/sfx/2873/2873-preview.mp3').play();
+                    setTimeout(() => { isProcessing = false; }, 1500);
+                }
+            } catch (e) { isProcessing = false; }
+        }
+
+        // --- ระบบ UI & Tabs ---
+        function switchTab(tab) {
+            // ปรับปุ่ม
+            document.querySelectorAll('button[id$="-btn"]').forEach(b => {
+                b.classList.remove('bg-indigo-600', 'text-white');
+                b.classList.add('text-slate-400');
+            });
+            document.getElementById(`tab-${tab}-btn`).classList.add('bg-indigo-600', 'text-white');
+
+            // ปรับ Content
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+
+            // Logic ประหยัดพลังงาน: ปิดกล้องเมื่อเปิด Dashboard
+            if (tab === 'dashboard') {
+                stopScanner();
+                document.getElementById('camera-section').classList.add('hidden', 'lg:block'); // ซ่อนส่วนกล้องในมือถือ
+            } else {
+                document.getElementById('camera-section').classList.remove('hidden');
+                if (html5Qr && !html5Qr.isScanning) {
+                    startScanner();
+                }
+            }
+        }
+
+        async function loadRecentLogs() {
+            try {
+                const snap = await db.collection(`artifacts/${appId}/public/data/checkins`)
+                                   .orderBy('timestamp', 'desc').limit(100).get();
+                if (snap.empty) return;
+                
+                document.getElementById('total-count').innerText = snap.size;
+
+                const docs = snap.docs;
+                // 10 รายการล่าสุด
+                document.getElementById('log-list').innerHTML = docs.slice(0, 10).map(doc => `
+                    <div class="bg-slate-800/40 p-4 rounded-2xl border border-white/5 flex justify-between items-center">
+                        <div class="flex flex-col">
+                            <span class="text-[11px] font-black text-white leading-tight">${doc.data().name}</span>
+                            <span class="text-[9px] text-indigo-400 font-bold uppercase mt-1">${doc.data().type}</span>
+                        </div>
+                        <span class="text-[10px] font-black text-emerald-400">${doc.data().checkInDate.split(' ')[1]}</span>
+                    </div>
+                `).join('');
+
+                // Dashboard เต็ม (ทั้งหมด)
+                document.getElementById('full-log-list').innerHTML = docs.map(doc => `
+                    <div class="bg-slate-800/20 p-3 rounded-xl border border-white/5 flex justify-between items-center text-[10px]">
+                        <div class="flex flex-col">
+                            <span class="font-black text-slate-200">${doc.data().name}</span>
+                            <span class="text-slate-500 font-bold truncate max-w-[200px]">${doc.data().unit}</span>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-indigo-400 font-black">${doc.data().type}</div>
+                            <div class="text-slate-600 font-bold">${doc.data().checkInDate.split(' ')[1]}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {}
+        }
+
+        async function exportCheckInCSV() {
+            try {
+                const snap = await db.collection(`artifacts/${appId}/public/data/checkins`).orderBy('timestamp', 'desc').get();
+                const data = snap.docs.map(doc => ({
+                    "รหัส": doc.data().personId, "ชื่อ-นามสกุล": doc.data().name, "หน่วยงาน": doc.data().unit,
+                    "ประเภท": doc.data().type, "เวลาเช็คอิน": doc.data().checkInDate
+                }));
+                const csv = Papa.unparse(data);
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' }));
+                a.download = `RTMS_Report.csv`; a.click();
+            } catch (err) { alert("Export Error"); }
+        }
+
+        window.onload = () => { requestPermission(); loadRecentLogs(); };
+    </script>
+</body>
+</html>
